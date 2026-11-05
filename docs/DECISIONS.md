@@ -10,9 +10,14 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
 - **Decision:** ONNX Runtime static QDQ quantisation, with calibration images from `train_v1` and `quant_pre_process` run first. FP32 is kept as a fallback.
 - **Reason:** ONNX Runtime recommends static quantisation for CNNs and dynamic for RNNs/transformers ([ORT docs](https://www.onnxruntime.ai/docs/performance/model-optimizations/quantization.html)). Per-class F1 is compared for FP32 vs INT8.
 
-## ADR-003 — SQLite for the prediction log
-- **Decision:** SQLite. No Postgres in v1.
-- **Reason:** One service and low write volume. The README notes it would move to Postgres with concurrent writers.
+## ADR-003 — SQLite locally, Postgres in the cloud (amended 2026-11-06)
+- **Decision:** One database layer, chosen by the `DATABASE_URL` env var:
+  - SQLite on the laptop and in tests;
+  - Azure Database for PostgreSQL Flexible Server (smallest tier) on Azure.
+
+  The application code is the same for both. Only `DATABASE_URL` changes.
+- **Reason:** Locally there is one service and low write volume, so SQLite is enough. On Azure, container filesystems are lost on restart and on scale to zero, and two apps (API and review UI) share the data, so a SQLite file there would lose data.
+- **History:** Originally "SQLite only, no Postgres in v1". Amended when deployment moved to Azure (ADR-012).
 
 ## ADR-004 — Retrain from the base checkpoint
 - **Decision:** Every retrain starts from the pretrained base on `train_v1 + all feedback`. It never fine-tunes the previous model.
@@ -42,7 +47,8 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
 - **Decision:** Use Evidently ≥ 0.7 (new `Report` API, pinned). It runs on per-image features (brightness, contrast, sharpness, embedding PCA) plus prediction and confidence.
 - **Reason:** Evidently works on tabular columns, not raw pixels. 0.7 made the new API the default ([migration](https://docs.evidentlyai.com/faq/migration.md)).
 
-## ADR-009 — Single-container Hugging Face Space
+## ADR-009 — Single-container Hugging Face Space (SUPERSEDED by ADR-012)
+- **Status:** Superseded. Azure Container Apps is now the main deployment. A Hugging Face Space is optional; if one is built, the rule below still applies.
 - **Decision:** The public demo is one Docker Space (Streamlit + ONNX, port 7860). The full stack runs locally with docker-compose.
 - **Reason:** A Docker Space runs one container on one port and cannot run docker-compose.
 
@@ -54,4 +60,21 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
 - **Options:**
   - **A.** Hosted MLflow on DagsHub. Kaggle logs with a token in Kaggle Secrets.
   - **B.** Offline: Kaggle writes artifacts, and `scripts/register_from_kaggle.py` logs them locally.
-- **Status:** Not decided. Decide before the first Kaggle run in Week 1.
+- **Status:** Not decided. Leaning A: DagsHub for MLflow and as the DVC remote. Decide at TASK-005 (DVC remote setup), before the first Kaggle run.
+
+## ADR-012 — Azure Container Apps as the main deployment (supersedes ADR-009)
+- **Decision:**
+  - The API (FastAPI + ONNX) and the Streamlit review UI run as two Azure Container Apps in one Container Apps environment, with scale to zero (min replicas 0).
+  - Images are pushed to GitHub Container Registry (GHCR).
+  - GitHub Actions runs CI, builds the image, pushes it to GHCR and deploys to Azure on every push to `main`.
+  - Azure deploy credentials live only in GitHub Secrets. Runtime secrets (API key, `DATABASE_URL`, GHCR pull credentials if the package is private) live only in Container Apps secrets.
+  - Prediction log and feedback go to Azure Database for PostgreSQL Flexible Server (see ADR-003).
+  - Cloud monitoring uses Azure Monitor (Log Analytics logs + Container Apps metrics). Prometheus + Grafana stay in the local docker-compose stack.
+  - Cost safety: Azure for Students subscription, a budget alert at about $10, scale to zero, smallest Postgres tier. Postgres does not scale to zero, so it is the main standing cost; stop it when idle.
+  - Rollback in the cloud means redeploying the previous image tag (Container Apps revision).
+  - A Hugging Face Space is optional (ADR-009 rules apply if it is built).
+- **Reason:** Two separate apps with HTTPS ingress, managed secrets, a managed database and an automated deploy from `main` are closer to a real production setup than a single-container demo Space. Scale to zero and a budget alert keep it within student credit.
+
+## ADR-013 — Training runs on the laptop CPU too
+- **Decision:** `python -m src.training.train --config configs/params.yaml` must run end to end on a CPU-only laptop. The device is selected automatically (or from config), with no CUDA-only code paths. Kaggle GPU is used only for sweeps and loop experiments.
+- **Reason:** `dvc repro` from a clean clone and the Prefect retrain flow both run on the laptop. Reproducing v1 must not depend on Kaggle quota or a GPU, so a reviewer without a GPU can rebuild the model.

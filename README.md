@@ -20,7 +20,7 @@ Factories cannot label every image up front. Inspection models have to keep lear
 ```
 image → FastAPI (ONNX, INT8) → prediction + calibrated confidence + OOD score
           │
-          ├─ log every request → SQLite (hash, prediction, confidence, OOD, latency, image features)
+          ├─ log every request → SQLite locally / PostgreSQL on Azure (hash, prediction, confidence, OOD, latency, image features)
           │
           ├─ low confidence OR OOD OR random audit → Streamlit review queue
           │                                              │ corrected labels
@@ -33,13 +33,24 @@ image → FastAPI (ONNX, INT8) → prediction + calibrated confidence + OOD scor
           │                                              ▼
           │                                MLflow registry: move @champion alias
           │
-          └─ monitoring: Prometheus + Grafana (latency, confidence, queue size, audit error)
+          └─ monitoring: Prometheus + Grafana locally (latency, confidence, queue size, audit error)
+                         Azure Monitor in the cloud
                          Evidently drift reports on per-image features
+
+push to main → GitHub Actions: CI → build image → GitHub Container Registry → Azure Container Apps (API + review UI)
 ```
+
+## Deployment (planned)
+
+- **Azure Container Apps:** the API and the review UI run as two apps that scale to zero.
+- **Azure Database for PostgreSQL:** stores the prediction log and feedback in the cloud. Locally the same code uses SQLite; `DATABASE_URL` picks the database.
+- **GitHub Actions:** every push to `main` runs CI, builds the image, pushes it to GitHub Container Registry and deploys to Azure. Azure credentials live only in GitHub Secrets.
+- **Cost safety:** Azure for Students subscription, a budget alert, scale to zero and the smallest Postgres tier.
+- A Hugging Face Space demo is optional.
 
 ## Tech stack
 
-PyTorch + timm (EfficientNet-B0) · MLflow (aliases) · DVC · Prefect · ONNX Runtime (static INT8) · FastAPI · Streamlit · SQLite · Prometheus + Grafana · Evidently · Docker · GitHub Actions · Hugging Face Spaces
+PyTorch + timm (EfficientNet-B0) · MLflow (aliases) · DVC · Prefect · ONNX Runtime (static INT8) · FastAPI · Streamlit · SQLite / PostgreSQL · Prometheus + Grafana · Azure Monitor · Evidently · Docker · GitHub Actions · GitHub Container Registry · Azure Container Apps
 
 ## Data
 
@@ -73,5 +84,6 @@ Setup instructions will be added as each phase lands. The target is `make setup 
 | `docs/DECISIONS.md` | Why each technical choice was made |
 | `docs/TEST_PLAN.md` | What "working" means |
 | `docs/MEMORY.md` | Current state of the project |
+| `docs/LEARNING.md` | What each task built, why it matters, and interview questions |
 | `TASKS.md` | Task breakdown by phase |
 | `CLAUDE.md` | Rules for AI-assisted development |

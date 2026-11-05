@@ -49,6 +49,9 @@ near-dups: ## pHash near-duplicate report across splits -> results/ (grid in res
 
 repro: ## Re-run the DVC pipeline (dvc.yaml) where inputs changed
 	$(RUN) dvc repro
+	@echo ""
+	@echo "Reminder: DVC autostage is off. Stage the results by hand:"
+	@echo "  git add dvc.lock   (plus any changed cache: false outputs; see git status)"
 
 push: ## Upload DVC-tracked data to the private local remote (../dvc-storage)
 	$(RUN) dvc push

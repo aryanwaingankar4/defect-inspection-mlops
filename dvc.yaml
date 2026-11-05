@@ -1,0 +1,38 @@
+# Pipeline stages. Run with `make repro` (uv run --locked dvc repro).
+# data/raw is tracked with `dvc add` (data/raw.dvc); remote = private local folder (ADR-018).
+stages:
+  split:
+    cmd: python -m src.data.split --config configs/params.yaml
+    deps:
+      - src/data/split.py
+      - src/data/download.py   # IMAGE_SUFFIXES
+      - src/config.py
+      - data/raw
+    params:
+      - configs/params.yaml:
+          - data.raw_dir
+          - data.split_file
+          - split.seed
+          - split.per_class
+    outs:
+      - data/splits/neu_split_v1.csv:
+          cache: false           # committed to git (TASK-003)
+
+  near_dups:
+    cmd: python -m src.data.near_duplicates --config configs/params.yaml
+    deps:
+      - src/data/near_duplicates.py
+      - src/data/split.py
+      - src/config.py
+      - data/raw
+      - data/splits/neu_split_v1.csv
+    params:
+      - configs/params.yaml:
+          - near_duplicates
+    outs:
+      - results/near_duplicates.csv:
+          cache: false           # committed to git
+      - results/private/near_duplicates_grid.png   # real NEU pixels: DVC cache only, never git
+    metrics:
+      - results/near_duplicates_summary.json:
+          cache: false           # committed to git

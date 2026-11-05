@@ -44,7 +44,9 @@
 | Azure Database for PostgreSQL | Flexible Server, smallest tier: prediction log and feedback in the cloud (ADR-003) |
 | Azure Monitor | Cloud logs (Log Analytics) and Container Apps metrics |
 | GitHub Actions + GHCR | CI, image build and push to GitHub Container Registry, deploy to Azure; Azure credentials only in GitHub Secrets |
-| DagsHub (leaning, decided at TASK-005) | Hosted MLflow + DVC remote (ADR-011) |
+| DVC remote (`../dvc-storage`) | Private local folder outside the repo: raw images and pixel outputs (ADR-018) |
+| DagsHub (public repo) | Hosted MLflow: metrics, params, models only; never NEU images (ADR-018) |
+| Kaggle private dataset | NEU images for GPU sweeps, attached to the launcher notebook (ADR-018) |
 | Hugging Face Space (optional) | One container: Streamlit demo + ONNX model, port 7860 (ADR-009) |
 
 ## Folder structure
@@ -61,6 +63,7 @@ defect-inspection-mlops/
 │   ├── serving/               # FastAPI app, ONNX inference, preprocess.py (shared), logging
 │   ├── review_ui/             # Streamlit queue
 │   ├── monitoring/            # Prometheus metrics, Evidently reports
+│   ├── tracking/              # MLflow helpers; artifact_policy.py guards against image artifacts
 │   └── simulation/            # production stream, simulated reviewer
 ├── scripts/                   # rollback.py, register_from_kaggle.py
 ├── notebooks/                 # Kaggle launchers only (clone + run), no logic
@@ -85,4 +88,6 @@ defect-inspection-mlops/
 - `results/` holds committed metric files (JSON/CSV/PNG). The README and resume quote only these.
 - The serving image contains ONNX Runtime, not PyTorch.
 - `infra/azure/` holds setup scripts and notes only, never credentials. Azure credentials live in GitHub Secrets; runtime secrets live in Container Apps secrets.
+- MLflow artifacts are logged only through `src/tracking/artifact_policy.safe_log_artifact`; the public DagsHub server never receives images with NEU pixels (ADR-018).
+- Outputs containing NEU pixels go to `results/private/` (git-ignored, DVC-cached only).
 - Database access goes through one layer that reads `DATABASE_URL`. No SQLite- or Postgres-specific code outside it.

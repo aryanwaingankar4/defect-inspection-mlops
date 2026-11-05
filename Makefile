@@ -11,7 +11,7 @@ NEU_DATASET := kaustubhdikshit/neu-surface-defect-database/1
 RAW_DIR := data/raw
 PARAMS := configs/params.yaml
 
-.PHONY: help setup lock lint format test test-all check data split near-dups
+.PHONY: help setup lock lint format test test-all check data split near-dups repro push pull
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -46,3 +46,12 @@ split: ## Make the deterministic train_v1/val/test_frozen/production_stream spli
 
 near-dups: ## pHash near-duplicate report across splits -> results/ (grid in results/private/)
 	$(RUN) python -m src.data.near_duplicates --config $(PARAMS)
+
+repro: ## Re-run the DVC pipeline (dvc.yaml) where inputs changed
+	$(RUN) dvc repro
+
+push: ## Upload DVC-tracked data to the private local remote (../dvc-storage)
+	$(RUN) dvc push
+
+pull: ## Restore DVC-tracked data from the private local remote
+	$(RUN) dvc pull

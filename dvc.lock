@@ -1,0 +1,90 @@
+schema: '2.0'
+stages:
+  split:
+    cmd: python -m src.data.split --config configs/params.yaml
+    deps:
+    - path: data/raw
+      hash: md5
+      md5: b59e5ed3116546542ea21654ca5732d1.dir
+      size: 28202290
+      nfiles: 3601
+    - path: src/config.py
+      hash: md5
+      md5: 9973d8c0af83b5904d61406884430143
+      size: 499
+    - path: src/data/download.py
+      hash: md5
+      md5: a7a1d924b420060959d5641ba16f5150
+      size: 5611
+    - path: src/data/split.py
+      hash: md5
+      md5: 34d2b31f8bbc623f8b5bff53a8c0d884
+      size: 3750
+    params:
+      configs/params.yaml:
+        data.raw_dir: data/raw
+        data.split_file: data/splits/neu_split_v1.csv
+        split.per_class:
+          train_v1: 25
+          val: 30
+          test_frozen: 60
+          production_stream: 185
+        split.seed: 42
+    outs:
+    - path: data/splits/neu_split_v1.csv
+      hash: md5
+      md5: 112fbbf79c941b6d551d827155591599
+      size: 140039
+  near_dups:
+    cmd: python -m src.data.near_duplicates --config configs/params.yaml
+    deps:
+    - path: data/raw
+      hash: md5
+      md5: b59e5ed3116546542ea21654ca5732d1.dir
+      size: 28202290
+      nfiles: 3601
+    - path: data/splits/neu_split_v1.csv
+      hash: md5
+      md5: 112fbbf79c941b6d551d827155591599
+      size: 140039
+    - path: src/config.py
+      hash: md5
+      md5: 9973d8c0af83b5904d61406884430143
+      size: 499
+    - path: src/data/near_duplicates.py
+      hash: md5
+      md5: 8382ec2bffd1f79c105163b06dd2a838
+      size: 7975
+    - path: src/data/split.py
+      hash: md5
+      md5: 34d2b31f8bbc623f8b5bff53a8c0d884
+      size: 3750
+    params:
+      configs/params.yaml:
+        near_duplicates:
+          hash_size: 8
+          max_distance: 8
+          report_distances:
+          - 0
+          - 2
+          - 4
+          - 6
+          - 8
+          alert_distance: 2
+          grid_top_k: 12
+          out_csv: results/near_duplicates.csv
+          out_summary: results/near_duplicates_summary.json
+          out_grid: results/private/near_duplicates_grid.png
+    outs:
+    - path: results/near_duplicates.csv
+      hash: md5
+      md5: beb3f9bae8892688653ae813e51f99fb
+      size: 66
+    - path: results/near_duplicates_summary.json
+      hash: md5
+      md5: 53c1d7a9a0af07501bc09be8b9296e59
+      size: 1518
+    - path: results/private/near_duplicates_grid.png
+      hash: md5
+      md5: 8685f619096bceb15302772f52b30a7c
+      size: 390458

@@ -12,3 +12,13 @@ split:
     val: 30
     test_frozen: 60
     production_stream: 185
+
+near_duplicates:
+  hash_size: 8                     # pHash bits = hash_size^2 = 64
+  max_distance: 8                  # cross-split pairs with Hamming distance <= this go to the CSV
+  report_distances: [0, 2, 4, 6, 8]  # cumulative counts (<= d) in the summary
+  alert_distance: 2                # pairs <= this are exact/near-exact: report before any re-split
+  grid_top_k: 12                   # closest cross-split pairs shown in the local PNG grid
+  out_csv: results/near_duplicates.csv
+  out_summary: results/near_duplicates_summary.json
+  out_grid: results/private/near_duplicates_grid.png  # real NEU pixels: git-ignored (ADR-015)

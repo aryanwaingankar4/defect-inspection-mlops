@@ -11,7 +11,7 @@ NEU_DATASET := kaustubhdikshit/neu-surface-defect-database/1
 RAW_DIR := data/raw
 PARAMS := configs/params.yaml
 
-.PHONY: help setup lock lint format test test-all check data split
+.PHONY: help setup lock lint format test test-all check data split near-dups
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -43,3 +43,6 @@ data: ## Download NEU into data/raw (skips if already complete; needs ~/.kaggle/
 
 split: ## Make the deterministic train_v1/val/test_frozen/production_stream split CSV
 	$(RUN) python -m src.data.split --config $(PARAMS)
+
+near-dups: ## pHash near-duplicate report across splits -> results/ (grid in results/private/)
+	$(RUN) python -m src.data.near_duplicates --config $(PARAMS)

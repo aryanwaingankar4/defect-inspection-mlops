@@ -5,11 +5,13 @@ description = "NEU steel-defect classifier with a human-in-the-loop retraining l
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 dependencies = [
+    "pillow>=13.0.0",
     "pyyaml>=6.0.3",
 ]
 
 [dependency-groups]
 dev = [
+    "imagehash>=4.3.2",
     "kaggle>=2.2.5",
     "pytest>=9.2.0",
     "ruff>=0.17.4",

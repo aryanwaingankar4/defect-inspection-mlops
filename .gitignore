@@ -23,6 +23,9 @@ venv/
 *.onnx
 *.ckpt
 
+# Outputs that contain dataset pixels: never commit (ADR-015, no licence to redistribute)
+/results/private/
+
 # MLflow / Prefect / local state
 mlruns/
 mlartifacts/

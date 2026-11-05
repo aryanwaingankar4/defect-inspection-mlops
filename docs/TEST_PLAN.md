@@ -9,10 +9,12 @@
 
 ## Preprocessing
 - **Parity:** the same image gives the same tensor through the training path and the serving path.
-- Grayscale input is handled exactly as documented (channel replication or `in_chans=1`).
+- Grayscale handling (ADR-016): any input (L, RGB, 3-channel JPEG) is converted to `L`, then replicated to 3 identical channels.
 
 ## Model
-- **Golden image:** a fixed image gives a fixed predicted class with the committed model.
+- **Golden images (ADR-017):**
+  - a committed synthetic image gives a fixed output with the committed model (runs in CI);
+  - a fixed real NEU image from `data/raw/` gives a fixed predicted class (`needs_data`; the image is never committed).
 - Temperature `T` is applied in the serving path. Serving confidence matches the calibrated evaluation output.
 - FP32 vs INT8 per-class F1 is recorded in `results/`.
 

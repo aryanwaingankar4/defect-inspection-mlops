@@ -81,4 +81,11 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
 
 ## ADR-014 — SQLAlchemy for the database layer from TASK-019
 - **Decision:** The prediction log is built with SQLAlchemy at TASK-019 and reads `DATABASE_URL` from the start (SQLite URL locally and in tests). The dependency is approved for TASK-019. A Postgres driver is added only at TASK-037, and needs approval then.
-- **Reason:** Postgres is needed on Azure (ADR-003). Building the SQLite log on SQLAlchemy now means TASK-037 is a small switch-over (driver, URL, Postgres test run), not a rewrite of the logging code. Reproducing v1 must not depend on Kaggle quota or a GPU, so a reviewer without a GPU can rebuild the model.
+- **Reason:** Postgres is needed on Azure (ADR-003).
+
+## ADR-015 — NEU data source and licence
+- **Decision:**
+  - Use the Kaggle copy `kaustubhdikshit/neu-surface-defect-database`, pinned to version 1. It is the authors' NEU-DET release: the same 1,800 images as NEU-CLS (6 classes × 300, 200×200), stored as `.jpg` instead of NEU-CLS's `.bmp`. The JPEG files have 3 channels (checked from the file headers), although the source images are grayscale; whether the 3 channels are identical is checked in TASK-006/007 and feeds the grayscale-handling decision. The class comes from the folder name. The uploader's train/validation split and the XML boxes are ignored; TASK-003 makes our own split.
+  - The dataset has **no formal licence.** The authors (Kechen Song, Yunhui Yan, Northeastern University) only ask for citation. We use it for non-commercial academic/portfolio work only, cite the 3 papers listed in `docs/DATA_CARD.md`, and **never redistribute the images**.
+  - Consequences: images are never committed to git; the DVC remote must be private; no dataset images in a public demo, Docker image or README without a deliberate decision.
+- **Reason:** The authors' own links (Google Drive / Baidu Pan) cannot be scripted reliably. The Kaggle copy can be downloaded with one pinned command, has a complete class-per-folder layout, and is the most-used NEU copy on Kaggle. The zip's SHA-256 is recorded in the data card to detect changes. JPEG instead of BMP may differ slightly at the pixel level from NEU-CLS, so published NEU-CLS numbers are not directly comparable. Building the SQLite log on SQLAlchemy now means TASK-037 is a small switch-over (driver, URL, Postgres test run), not a rewrite of the logging code. Reproducing v1 must not depend on Kaggle quota or a GPU, so a reviewer without a GPU can rebuild the model.

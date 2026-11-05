@@ -6,7 +6,11 @@ RUN := uv run --locked
 # Tests that need data, a model, a human, or a long time are skipped by `make test`.
 FAST_TESTS := not slow and not manual and not needs_data and not needs_model
 
-.PHONY: help setup lock lint format test test-all check
+# Pinned Kaggle copy of NEU (NEU-DET release, .jpg). See ADR-015 and docs/DATA_CARD.md.
+NEU_DATASET := kaustubhdikshit/neu-surface-defect-database/1
+RAW_DIR := data/raw
+
+.PHONY: help setup lock lint format test test-all check data
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -32,3 +36,6 @@ test-all: ## All tests, including slow / manual / needs_data / needs_model
 	$(RUN) pytest
 
 check: lint test ## Lint + fast tests (what CI runs)
+
+data: ## Download NEU into data/raw (skips if already complete; needs ~/.kaggle/kaggle.json)
+	$(RUN) python -m src.data.download --dataset $(NEU_DATASET) --out $(RAW_DIR)

@@ -8,8 +8,10 @@ dependencies = []
 
 [dependency-groups]
 dev = [
+    "kaggle>=2.2.5",
     "pytest>=9.2.0",
     "ruff>=0.17.4",
+    "six>=1.17.0",
 ]
 train = []
 serve = []

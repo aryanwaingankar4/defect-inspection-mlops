@@ -1,0 +1,13 @@
+# Normalise line endings: LF in the repo and in the working tree (Makefile, shell, YAML).
+* text=auto eol=lf
+
+# Images are binary: no line-ending conversion, no text diff.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.bmp  binary
+*.gif  binary
+*.tif  binary
+*.tiff binary
+*.webp binary
+*.ico  binary

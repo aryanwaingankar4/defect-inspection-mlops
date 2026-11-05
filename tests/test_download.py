@@ -80,8 +80,38 @@ def test_no_images_tracked_in_git() -> None:
     tracked = subprocess.run(
         ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
     ).stdout.splitlines()
-    images = [p for p in tracked if Path(p).suffix.lower() in dl.IMAGE_SUFFIXES]
-    assert images == [], f"Image files must not be committed (DVC tracks data): {images}"
+    forbidden = [p for p in tracked if is_forbidden_image(p)]
+    assert forbidden == [], f"Image files must not be committed (ADR-015): {forbidden}"
+
+
+def is_forbidden_image(path: str) -> bool:
+    """Dataset-like images (.jpg/.bmp/...) are never committed. PNG is allowed only for plots
+    in results/, never in results/private/ (real NEU pixels)."""
+    p = Path(path)
+    suffix = p.suffix.lower()
+    if suffix not in dl.IMAGE_SUFFIXES:
+        return False
+    if suffix != ".png":
+        return True
+    parts = p.parts
+    return not (len(parts) > 1 and parts[0] == "results" and parts[1] != "private")
+
+
+@pytest.mark.parametrize(
+    ("path", "forbidden"),
+    [
+        ("data/raw/NEU-DET/a.jpg", True),
+        ("results/sample.jpg", True),
+        ("docs/figure.bmp", True),
+        ("docs/diagram.png", True),
+        ("results/private/near_duplicates_grid.png", True),
+        ("results/reliability_diagram.png", False),
+        ("results/plots/confusion_matrix.png", False),
+        ("src/data/split.py", False),
+    ],
+)
+def test_forbidden_image_rule(path: str, forbidden: bool) -> None:
+    assert is_forbidden_image(path) is forbidden
 
 
 @pytest.mark.needs_data

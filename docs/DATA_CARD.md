@@ -21,6 +21,10 @@ Status: **source and licence only (TASK-002).** Composition, splits, duplicates 
 - Layout: `data/raw/NEU-DET/{train,validation}/images/<class>/*.jpg`. The class is the folder name.
 - Ignored: the uploader's train/validation split (240/60 per class; our split comes from TASK-003) and the XML bounding boxes in `annotations/`.
 
+### Known issues (partial; completed in TASK-006)
+- **Exact duplicate file:** `NEU-DET/train/images/patches/patches_101.jpg` and `patches_105.jpg` are byte-identical. Both are in `production_stream` (no cross-split leakage), so the simulated stream contains this image twice. Kept as is; documented here only. Found by TASK-004 (`results/near_duplicates_summary.json`, `within_split_alert_pairs`).
+- **Shifted near-copies:** pHash does not detect slightly shifted crops of the same surface. A shift-tolerant check (TASK-008b, CNN embeddings) runs before TASK-011.
+
 ### Licence
 - **No formal licence.** Kaggle lists it as "Unknown". The official page names no licence; it says "We would appreciate it if you cite our works when using the database", with a footer "Copyright 2020 Northeastern University". Community mirrors describe it as academic research use only, not commercial.
 - Other Kaggle copies tagged MIT, Apache or CC0 were re-uploaded by people who do not own the data; those tags are not trusted.

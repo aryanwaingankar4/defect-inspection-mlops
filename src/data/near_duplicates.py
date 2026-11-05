@@ -193,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
 
     write_pairs_csv(within, Path(cfg["out_csv"]))
     out_summary = Path(cfg["out_summary"])
-    out_summary.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    out_summary.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8", newline="\n")
     draw_grid(top, raw_dir, Path(cfg["out_grid"]))
 
     print(f"[near-dups] compared {summary['cross_split_pairs_compared']} cross-split pairs")

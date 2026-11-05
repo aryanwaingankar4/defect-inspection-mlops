@@ -77,4 +77,8 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
 
 ## ADR-013 — Training runs on the laptop CPU too
 - **Decision:** `python -m src.training.train --config configs/params.yaml` must run end to end on a CPU-only laptop. The device is selected automatically (or from config), with no CUDA-only code paths. Kaggle GPU is used only for sweeps and loop experiments.
-- **Reason:** `dvc repro` from a clean clone and the Prefect retrain flow both run on the laptop. Reproducing v1 must not depend on Kaggle quota or a GPU, so a reviewer without a GPU can rebuild the model.
+- **Reason:** `dvc repro` from a clean clone and the Prefect retrain flow both run on the laptop.
+
+## ADR-014 — SQLAlchemy for the database layer from TASK-019
+- **Decision:** The prediction log is built with SQLAlchemy at TASK-019 and reads `DATABASE_URL` from the start (SQLite URL locally and in tests). The dependency is approved for TASK-019. A Postgres driver is added only at TASK-037, and needs approval then.
+- **Reason:** Postgres is needed on Azure (ADR-003). Building the SQLite log on SQLAlchemy now means TASK-037 is a small switch-over (driver, URL, Postgres test run), not a rewrite of the logging code. Reproducing v1 must not depend on Kaggle quota or a GPU, so a reviewer without a GPU can rebuild the model.

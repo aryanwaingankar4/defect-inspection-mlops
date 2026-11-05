@@ -1,0 +1,14 @@
+# Single source of seeds, sizes, hyperparameters, thresholds and gate rules (see CLAUDE.md).
+
+data:
+  raw_dir: data/raw                              # DVC/git-ignored NEU images (ADR-015)
+  split_file: data/splits/neu_split_v1.csv       # committed: path,class,split
+
+split:
+  seed: 42                                       # split-only seed; independent of training seeds
+  # Images per class, cut in this order after a seeded shuffle. Must sum to 300 (NEU per class).
+  per_class:
+    train_v1: 25
+    val: 30
+    test_frozen: 60
+    production_stream: 185

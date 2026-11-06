@@ -22,10 +22,11 @@
    - its OOD score flags it, OR
    - it is picked by the random audit sample of auto-accepted images.
 6. **Feedback.** Corrected labels are saved to `data/feedback/` and versioned with DVC. The reviewer is simulated in batch runs.
-7. **Retrain.** When N new labels exist, the Prefect `retrain_flow` runs on the laptop CPU:
+7. **Retrain.** When N new labels exist, the Prefect `retrain_flow` on the laptop submits a Kaggle GPU job with `kaggle kernels push` (ADR-019). The job:
    - it trains from the base checkpoint on `train_v1 + all feedback`;
    - it calibrates on `val`;
-   - it evaluates on `test_frozen`.
+   - it evaluates on `test_frozen`;
+   - it logs the candidate to DagsHub MLflow, where the laptop picks it up.
 8. **Promotion gate.** The candidate (`@challenger`) and `@champion` are compared on the same `test_frozen` images. See `DECISIONS.md` (ADR-005) for the rules. Every decision is written to `results/promotion_log.json`.
 9. **Deploy.** If the candidate passes, `@champion` moves to it and the model is exported to ONNX. On push to `main`, GitHub Actions (`.github/workflows/deploy-azure.yml`) runs CI, builds the image, pushes it to GitHub Container Registry and deploys the API and review UI Container Apps on Azure.
 10. **Monitor.**
@@ -38,8 +39,8 @@
 
 | Where | What runs |
 |---|---|
-| Laptop (docker-compose) | API, review UI, MLflow, Prometheus, Grafana, Prefect retrain, SQLite. Training runs here on CPU too (ADR-013) |
-| Kaggle GPU | Training sweeps and loop experiments only, run from repo code |
+| Laptop (docker-compose) | API, review UI, Prometheus, Grafana, Prefect retrain flow (submits Kaggle jobs), SQLite. Tests, tiny training smoke runs and ONNX export only; no full training (ADR-019) |
+| Kaggle GPU | All full training: baseline, sweeps, Phase 3 retrains; run from repo code (ADR-019) |
 | Azure Container Apps | Main deployment: API app + review UI app, scale to zero, secrets in Container Apps secrets (ADR-012) |
 | Azure Database for PostgreSQL | Flexible Server, smallest tier: prediction log and feedback in the cloud (ADR-003) |
 | Azure Monitor | Cloud logs (Log Analytics) and Container Apps metrics |

@@ -40,7 +40,7 @@ Show a complete, trustworthy production loop for a vision model. The loop is: se
 - Multi-camera / edge deployment (described in the README only)
 
 ## Success criteria
-- `dvc repro` rebuilds the v1 model from a clean clone.
+- Rerunning the Kaggle launcher at the recorded git commit, data version and seed rebuilds the v1 model (ADR-019).
 - The API runs in Docker, rejects bad inputs, and returns version and confidence fields.
 - The simulated loop produces versions v1 → v3 with at least one gate rejection, and every decision is logged in `results/`.
 - Rollback restores the previous `@champion`.
@@ -51,5 +51,5 @@ Show a complete, trustworthy production loop for a vision model. The loop is: se
 
 ## Constraints
 - Free tools, plus an Azure for Students subscription. Azure budget alert at about $10, scale to zero, smallest Postgres tier.
-- A 16 GB CPU laptop. Training must also run on the laptop CPU (ADR-013). Kaggle GPU (about 30 h/week) is for sweeps only.
+- A 16 GB CPU laptop: tests, smoke runs, ONNX export and serving only. All full training runs on Kaggle GPU (about 30 h/week, ADR-019).
 - 8–12 h/week. Target: 5 weeks.

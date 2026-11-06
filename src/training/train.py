@@ -258,6 +258,9 @@ def data_fingerprint(raw_dir: Path, rel_paths: Sequence[str]) -> str:
 
 
 def write_curve(rows: list[dict[str, float]], out_dir: Path) -> None:
+    # Jupyter (e.g. Kaggle) exports MPLBACKEND=module://matplotlib_inline...; our venv has no
+    # matplotlib_inline, so `import matplotlib` would fail on it. We only write files: force Agg.
+    os.environ["MPLBACKEND"] = "Agg"
     import matplotlib
 
     matplotlib.use("Agg")

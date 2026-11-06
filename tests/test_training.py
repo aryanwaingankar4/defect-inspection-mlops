@@ -339,3 +339,22 @@ def test_check_gpu_stops_on_unsupported_gpu(monkeypatch) -> None:
     with pytest.raises(RuntimeError, match="no kernels for Tesla P100"):
         train_mod.check_gpu(torch.device("cuda"))
     train_mod.check_gpu(torch.device("cpu"))  # no-op on CPU
+
+
+def test_write_curve_ignores_jupyter_mplbackend(tmp_path: Path) -> None:
+    """Kaggle runs us under Jupyter, which exports an inline MPLBACKEND our venv cannot load.
+
+    Fresh process: matplotlib reads MPLBACKEND only on its first import.
+    """
+    import os
+    import subprocess
+    import sys
+
+    code = (
+        "import sys; from pathlib import Path; from src.training.train import write_curve; "
+        "write_curve([{'epoch': 1, 'train_loss': 1.0, 'val_loss': 1.0, 'val_macro_f1': 0.5}], "
+        "Path(sys.argv[1]))"
+    )
+    env = {**os.environ, "MPLBACKEND": "module://matplotlib_inline.backend_inline"}
+    subprocess.run([sys.executable, "-c", code, str(tmp_path)], cwd=REPO_ROOT, env=env, check=True)
+    assert (tmp_path / "training_curves.png").stat().st_size > 0

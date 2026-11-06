@@ -13,6 +13,12 @@ split:
     test_frozen: 60
     production_stream: 185
 
+preprocess:                        # used by src/serving/preprocess.py only (train, eval, serve)
+  image_size: 224                  # square output side in pixels
+  interpolation: bilinear          # resize filter: nearest | bilinear | bicubic | lanczos
+  mean: [0.485, 0.456, 0.406]      # ImageNet, per channel, on [0,1] pixels
+  std: [0.229, 0.224, 0.225]       # ImageNet, per channel
+
 near_duplicates:
   hash_size: 8                     # pHash bits = hash_size^2 = 64
   max_distance: 8                  # cross-split pairs with Hamming distance <= this go to the CSV

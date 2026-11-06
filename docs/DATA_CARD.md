@@ -31,6 +31,7 @@ message prints the block to paste. Do not edit generated blocks by hand.
 - **Downloaded:** 2026-11-05T21:55:07Z (UTC). **Zip SHA-256:** `2ccaff85d88567c52708c2f9dc4dec10cff8650749df2984f03b38716998460f`.
   Both are copied from `data/raw/download_manifest.json` (DVC-tracked via `data/raw.dvc`). A different hash on a fresh download means the Kaggle copy changed.
 - **Storage:** `data/raw/` is DVC-tracked; the DVC remote is a private local folder (ADR-018). No image is in git.
+- **Training copy:** a **private** Kaggle dataset `neu-det-private` under the project owner's account, uploaded from `data/raw/` with `make kaggle-dataset` (TASK-010, ADR-019). The upload script refuses to publish publicly and checks privacy three ways: the API flag, an anonymous request (blocked), and the file list (the 1,800 images of the split CSV). Each training run records a fingerprint of the images it read (`provenance.data_fingerprint` in `results/train/val_metrics.json`); it matches the fingerprint computed from the laptop's DVC copy.
 
 ### Classes
 The class is the folder name. Per-class counts are in the [split table](#splits).

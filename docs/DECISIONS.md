@@ -121,8 +121,16 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
   - **Reproducibility** = pinned git commit + data version + `train.seed`. Every run records the git commit (and whether the tree was dirty), the DVC hash of `data/raw` from the committed `data/raw.dvc`, and a SHA-256 fingerprint of the images actually read. The fingerprint can be compared between the laptop's DVC copy and the Kaggle dataset.
   - **Trained models come back through DagsHub MLflow** (TASK-009): the Kaggle run logs the model; the laptop downloads it by alias for evaluation, ONNX export and serving.
   - **Phase 3:** the Prefect `retrain_flow` on the laptop submits a Kaggle job with `kaggle kernels push`, polls `kaggle kernels status`, and picks up the candidate from MLflow.
-- **Reason:** Full training runs out of memory on the 16 GB laptop. Kaggle gives a free GPU (about 30 h/week), and running every real training there keeps one consistent environment.
+- **Reason:** Full training runs out of memory on the 16 GB laptop. Kaggle gives a free GPU, and running every real training there keeps one consistent environment. (Quota: on 2026-11-06 the Kaggle API reported 6 h of GPU per period for this account, refreshing Saturday 00:00 UTC; not the "about 30 h/week" first assumed. `make kaggle-push` prints the live quota.)
 - **Consequences / risks:**
   - "`dvc repro` rebuilds v1 from a clean clone" no longer holds on a CPU-only machine. v1 is rebuilt by rerunning the Kaggle launcher at the recorded commit, data version and seed.
   - GPU runs are seeded and use deterministic cuDNN settings, but are not guaranteed bit-for-bit identical across GPU types; CPU runs on one machine are.
   - Kaggle quota, availability and internet access become external dependencies. The Kaggle API token (`kaggle.json`) and the DagsHub token stay out of git (Kaggle Secrets / local user config).
+- **Implemented (TASK-010):**
+  - `make kaggle-dataset` uploads `data/raw` as the private dataset `neu-det-private` and verifies privacy (`src/data/kaggle_dataset.py`).
+  - `make kaggle-push` renders `notebooks/kaggle_train_launcher.ipynb` pinned to `HEAD` (refuses a dirty tree or an unpushed commit) and pushes it as the private notebook `neu-train-launcher` on a T4. P100s cannot run the CUDA 13 torch build; `train.py` stops on a GPU without kernels.
+  - MLflow credentials come from three Kaggle Secrets (`MLFLOW_TRACKING_URI`, `_USERNAME`, `_PASSWORD`), attached in the notebook editor and never printed.
+  - **Finding:** a run started by `kaggle kernels push` could not read the attached secrets (HTTP 400 from the secrets service), while a run started from the website (**Save Version → Save & Run All**) could. The attachment survives a CLI push. Current workflow: `make kaggle-push ARGS=--no-run`, then start the run on kaggle.com, then `make kaggle-status` / `make kaggle-output`.
+  - **Open for Phase 3:** fully automatic submission from the Prefect `retrain_flow` needs another way to give the job its MLflow credentials. To be decided before the Phase 3 `retrain_flow` task.
+  - Kaggle runs the launcher under Jupyter, which exports an inline `MPLBACKEND`; `train.py` forces `Agg` before plotting.
+  - Baseline v1 (efficientnet_b0): results in `results/train/`, model `steel-defect-classifier` version 1. Two T4 runs at different commits with no training-code change gave identical best-epoch validation metrics.

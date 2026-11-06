@@ -15,7 +15,8 @@ NEU_DATASET := kaustubhdikshit/neu-surface-defect-database/1
 RAW_DIR := data/raw
 PARAMS := configs/params.yaml
 
-.PHONY: help setup lock lint format test test-all check data split near-dups repro push pull train train-smoke \n	kaggle-dataset kaggle-push kaggle-status kaggle-output
+.PHONY: help setup lock lint format test test-all check data split near-dups repro push pull train train-smoke \
+	kaggle-dataset kaggle-push kaggle-status kaggle-output
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -72,7 +73,7 @@ train-smoke: ## Tiny end-to-end training check on real data (CPU OK; outputs in 
 kaggle-dataset: ## Upload data/raw to Kaggle as a PRIVATE dataset and verify it stays private
 	$(RUN) python -m src.data.kaggle_dataset --config $(PARAMS)
 
-kaggle-push: ## Push the launcher (pinned to HEAD; must be committed + pushed). ARGS=--no-run to only save
+kaggle-push: ## Push the launcher pinned to HEAD (committed + pushed). Use ARGS=--no-run, then Save & Run All on kaggle.com (ADR-019)
 	$(RUN) python -m src.pipelines.kaggle_job --config $(PARAMS) push $(ARGS)
 
 kaggle-status: ## Status of the latest Kaggle training run

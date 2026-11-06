@@ -51,5 +51,5 @@ Show a complete, trustworthy production loop for a vision model. The loop is: se
 
 ## Constraints
 - Free tools, plus an Azure for Students subscription. Azure budget alert at about $10, scale to zero, smallest Postgres tier.
-- A 16 GB CPU laptop: tests, smoke runs, ONNX export and serving only. All full training runs on Kaggle GPU (about 30 h/week, ADR-019).
+- A 16 GB CPU laptop: tests, smoke runs, ONNX export and serving only. All full training runs on Kaggle GPU (limited free quota, see ADR-019).
 - 8–12 h/week. Target: 5 weeks.

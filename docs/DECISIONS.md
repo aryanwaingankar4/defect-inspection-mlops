@@ -146,3 +146,4 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
   - The MLflow run's start/end times are the training times, but the upload happens later; the tag `published_from=laptop` says so.
   - Baseline v1 (`steel-defect-classifier` version 1) was logged directly from Kaggle under ADR-019 and stays as it is; its `results/train/val_metrics.json` has the older layout (no `run_uid`, timing or parameter count).
   - The DagsHub token that was stored in Kaggle Secrets should be deleted there and rotated.
+- **Implemented (TASK-010):** `src/tracking/publish.py` (`make register`), commit `a681102`. First run through the new flow: MobileNetV3-small (`mobilenetv3_small_100.lamb_in1k`) started by `make kaggle-push` alone, published with `--role comparison` and not registered; results in `results/compare/mobilenetv3_small_100/` next to the baseline in `results/train/`.

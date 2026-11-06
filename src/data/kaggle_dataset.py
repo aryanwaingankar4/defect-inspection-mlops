@@ -67,18 +67,29 @@ def find_own_dataset(api: Any, ref: str) -> Any | None:
 def upload(api: Any, staging_dir: Path, ref: str) -> str:
     """Create the dataset privately, or add a version if it already exists."""
     if find_own_dataset(api, ref) is None:
-        api.dataset_create_new(str(staging_dir), public=False, quiet=True, dir_mode="zip")
-        return "created"
-    api.dataset_create_version(
-        str(staging_dir), version_notes="re-upload data/raw", quiet=True, dir_mode="zip"
-    )
-    return "new version"
+        resp = api.dataset_create_new(str(staging_dir), public=False, quiet=True, dir_mode="zip")
+        action = "created"
+    else:
+        resp = api.dataset_create_version(
+            str(staging_dir), version_notes="re-upload data/raw", quiet=True, dir_mode="zip"
+        )
+        action = "new version"
+    error = getattr(resp, "error", None)  # the API reports rejections here instead of raising
+    if error:
+        raise RuntimeError(f"Kaggle rejected the upload of {ref}: {error}")
+    return action
 
 
 def wait_until_ready(api: Any, ref: str, timeout_s: int = 900, poll_s: int = 15) -> None:
     deadline = time.monotonic() + timeout_s
     while True:
-        status = str(api.dataset_status(ref)).lower()
+        try:
+            status = str(api.dataset_status(ref)).lower()
+        except Exception as exc:  # right after creation Kaggle answers 403/404 for a while
+            code = getattr(getattr(exc, "response", None), "status_code", None)
+            if code not in (403, 404):
+                raise
+            status = f"not visible yet (HTTP {code})"
         if "ready" in status:
             return
         if "error" in status:

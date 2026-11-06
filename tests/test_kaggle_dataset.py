@@ -16,8 +16,9 @@ REF = "me/neu-det-private"
 
 
 class FakeApi:
-    def __init__(self, existing=None, is_private=True):
+    def __init__(self, existing=None, is_private=True, error=""):
         self.existing = existing
+        self.error = error
         self.is_private = is_private
         self.calls = []
 
@@ -28,9 +29,11 @@ class FakeApi:
 
     def dataset_create_new(self, folder, public=False, quiet=False, dir_mode="skip"):
         self.calls.append(("create", folder, public, dir_mode))
+        return SimpleNamespace(error=self.error)
 
     def dataset_create_version(self, folder, version_notes, quiet=False, dir_mode="skip"):
         self.calls.append(("version", folder, dir_mode))
+        return SimpleNamespace(error=self.error)
 
 
 @pytest.fixture
@@ -108,3 +111,33 @@ def test_verify_files() -> None:
     kd.verify_files(["NEU-DET/a/x.jpg", "NEU-DET/b/y.jpg", "NEU-DET/a/x.xml"], expected)
     with pytest.raises(RuntimeError, match="1 missing"):
         kd.verify_files(["NEU-DET/a/x.jpg"], expected)
+
+
+def test_upload_surfaces_api_rejection(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="rejected.*title too short"):
+        kd.upload(FakeApi(error="title too short"), tmp_path, REF)
+
+
+def test_wait_until_ready_tolerates_early_403() -> None:
+    class Err(Exception):
+        def __init__(self, code: int) -> None:
+            self.response = SimpleNamespace(status_code=code)
+
+    answers = [Err(403), Err(404), "running", "ready"]
+
+    class Api:
+        def dataset_status(self, ref):
+            answer = answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+    kd.wait_until_ready(Api(), REF, timeout_s=5, poll_s=0)
+    assert answers == []
+
+    class Broken:
+        def dataset_status(self, ref):
+            raise Err(500)
+
+    with pytest.raises(Err):
+        kd.wait_until_ready(Broken(), REF, timeout_s=5, poll_s=0)

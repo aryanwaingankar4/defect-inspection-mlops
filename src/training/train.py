@@ -91,6 +91,29 @@ def resolve_device() -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def gpu_supported(capability: tuple[int, int], arch_list: Sequence[str]) -> bool:
+    """True if this torch build has kernels for the GPU (exact ``sm_XY`` or older-or-equal PTX)."""
+    cap = capability[0] * 10 + capability[1]
+    if f"sm_{cap}" in arch_list:
+        return True
+    ptx = [int(a.removeprefix("compute_")) for a in arch_list if a.startswith("compute_")]
+    return any(p <= cap for p in ptx)
+
+
+def check_gpu(device: torch.device) -> None:
+    """Print the GPU and stop early if torch cannot run on it (e.g. P100 with CUDA 13 builds)."""
+    if device.type != "cuda":
+        return
+    name, cap = torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0)
+    arch_list = torch.cuda.get_arch_list()
+    print(f"GPU: {name} (sm_{cap[0]}{cap[1]}); torch {torch.__version__}", flush=True)
+    if not gpu_supported(cap, arch_list):
+        raise RuntimeError(
+            f"torch {torch.__version__} has no kernels for {name} (sm_{cap[0]}{cap[1]}); "
+            f"supported: {', '.join(arch_list)}. Use a T4 on Kaggle (ADR-019)."
+        )
+
+
 def check_device(device: torch.device, *, smoke: bool, allow_cpu: bool) -> bool:
     """True if training may start. Full runs without a GPU need ``--allow-cpu`` (ADR-019)."""
     if device.type == "cuda" or smoke:
@@ -488,6 +511,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     device = resolve_device()
     if not check_device(device, smoke=args.smoke, allow_cpu=args.allow_cpu):
         return EXIT_NEEDS_GPU
+    check_gpu(device)
     print(f"device: {device.type}{'  (smoke run)' if args.smoke else ''}", flush=True)
     metrics = run(params, device, smoke=args.smoke)
     tracked = metrics["mlflow"]

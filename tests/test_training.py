@@ -314,3 +314,28 @@ def test_tiny_training_run_is_repeatable(synthetic_data, tmp_path) -> None:
         assert torch.equal(v, b["state_dict"][k]), k
     assert m1["val_macro_f1"] == m2["val_macro_f1"]
     assert m1["provenance"]["data_fingerprint"] == m2["provenance"]["data_fingerprint"]
+
+
+# ---------------------------------------------------------------- GPU support check
+
+
+@pytest.mark.parametrize(
+    ("cap", "arch", "ok"),
+    [
+        ((7, 5), ["sm_75", "sm_80", "sm_90", "compute_90"], True),  # T4
+        ((6, 0), ["sm_75", "sm_80", "sm_90", "compute_90"], False),  # P100 on a CUDA 13 build
+        ((12, 0), ["sm_75", "sm_90", "compute_90"], True),  # newer GPU via PTX JIT
+        ((6, 0), ["sm_60", "sm_75"], True),
+    ],
+)
+def test_gpu_supported(cap, arch, ok) -> None:
+    assert train_mod.gpu_supported(cap, arch) is ok
+
+
+def test_check_gpu_stops_on_unsupported_gpu(monkeypatch) -> None:
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda i: "Tesla P100-PCIE-16GB")
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda i: (6, 0))
+    monkeypatch.setattr(torch.cuda, "get_arch_list", lambda: ["sm_75", "sm_80"])
+    with pytest.raises(RuntimeError, match="no kernels for Tesla P100"):
+        train_mod.check_gpu(torch.device("cuda"))
+    train_mod.check_gpu(torch.device("cpu"))  # no-op on CPU

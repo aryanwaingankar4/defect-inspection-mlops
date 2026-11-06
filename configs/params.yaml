@@ -52,6 +52,20 @@ tracking:                          # MLflow (ADR-018). Server from env MLFLOW_TR
   local_uri: sqlite:///mlruns/mlflow.db   # offline fallback (git-ignored); registry needs a DB store;
                                           # artifacts go to mlruns/artifacts next to it
 
+kaggle:                            # TASK-010: all full training runs on Kaggle GPU (ADR-019)
+  dataset_slug: neu-det-private    # PRIVATE dataset owned by the account in ~/.kaggle/kaggle.json
+  dataset_title: NEU-DET private copy
+  kernel_slug: neu-train-launcher  # private notebook; logic-free launcher
+  kernel_title: neu-train-launcher
+  accelerator: NvidiaTeslaT4       # "GPU T4 x2". P100 is retired on Kaggle and unsupported by torch 2.15 (CUDA 13)
+  num_workers: 2
+  repo_url: https://github.com/aryanwaingankar4/defect-inspection-mlops.git
+  uv_version: 0.13.6
+  notebook_template: notebooks/kaggle_train_launcher.ipynb
+  staging_dir: build/kaggle-dataset   # git-ignored; never write into data/raw (would change its DVC hash)
+  kernel_dir: build/kaggle-kernel     # rendered notebook + kernel-metadata.json
+  output_dir: build/kaggle-output     # downloaded run outputs
+
 near_duplicates:
   hash_size: 8                     # pHash bits = hash_size^2 = 64
   max_distance: 8                  # cross-split pairs with Hamming distance <= this go to the CSV

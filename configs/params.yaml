@@ -19,6 +19,31 @@ preprocess:                        # used by src/serving/preprocess.py only (tra
   mean: [0.485, 0.456, 0.406]      # ImageNet, per channel, on [0,1] pixels
   std: [0.229, 0.224, 0.225]       # ImageNet, per channel
 
+train:                             # src/training/train.py; full runs on Kaggle GPU only (ADR-019)
+  seed: 1                          # training seed, independent of split.seed
+  model: efficientnet_b0           # timm model name
+  pretrained: true                 # ImageNet weights (downloaded once from the HF Hub)
+  train_splits: [train_v1]         # feedback is added in Phase 3 (TASK-028)
+  val_split: val                   # early stopping; never test_frozen
+  lr: 0.0003                       # AdamW
+  weight_decay: 0.01               # AdamW
+  batch_size: 16
+  max_epochs: 40
+  patience: 8                      # stop after this many epochs without val macro-F1 improvement
+  num_workers: 0                   # DataLoader workers (CLI --num-workers overrides, e.g. on Kaggle)
+  augment:                         # training only (src/training/augment.py)
+    hflip_p: 0.5
+    vflip_p: 0.5
+    rotation_deg: 10               # angle drawn from [-10, 10]; corners filled with the image's mean grey
+    brightness: 0.10               # factor drawn from [0.9, 1.1]
+    contrast: 0.10                 # factor drawn from [0.9, 1.1]
+  out_checkpoint: models/baseline/best.pt  # git-ignored (CLI --out-checkpoint overrides)
+  out_dir: results/train           # val metrics + training curve (CLI --out-dir overrides)
+  smoke:                           # `--smoke`: tiny end-to-end check, allowed on a CPU laptop
+    images_per_class: 2            # per split, first N per class in split-CSV order
+    max_epochs: 1
+    out_dir: models/smoke          # checkpoint + results of smoke runs; git-ignored
+
 near_duplicates:
   hash_size: 8                     # pHash bits = hash_size^2 = 64
   max_distance: 8                  # cross-split pairs with Hamming distance <= this go to the CSV

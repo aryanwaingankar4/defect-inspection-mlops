@@ -2,6 +2,8 @@
 .DEFAULT_GOAL := help
 
 RUN := uv run --locked
+# Training deps (torch, timm, matplotlib) live in the `train` group.
+RUN_TRAIN := uv run --locked --group train
 
 # Tests that need data, a model, a human, or a long time are skipped by `make test`.
 FAST_TESTS := not slow and not manual and not needs_data and not needs_model
@@ -11,7 +13,7 @@ NEU_DATASET := kaustubhdikshit/neu-surface-defect-database/1
 RAW_DIR := data/raw
 PARAMS := configs/params.yaml
 
-.PHONY: help setup lock lint format test test-all check data split near-dups repro push pull
+.PHONY: help setup lock lint format test test-all check data split near-dups repro push pull train train-smoke
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -31,10 +33,10 @@ format: ## Auto-fix lint issues and format code
 	$(RUN) ruff format .
 
 test: ## Fast tests (skips slow, manual, needs_data, needs_model)
-	$(RUN) pytest -m "$(FAST_TESTS)"
+	$(RUN_TRAIN) pytest -m "$(FAST_TESTS)"
 
 test-all: ## All tests, including slow / manual / needs_data / needs_model
-	$(RUN) pytest
+	$(RUN_TRAIN) pytest
 
 check: lint test ## Lint + fast tests (what CI runs)
 
@@ -58,3 +60,9 @@ push: ## Upload DVC-tracked data to the private local remote (../dvc-storage)
 
 pull: ## Restore DVC-tracked data from the private local remote
 	$(RUN) dvc pull
+
+train: ## Full training (Kaggle GPU; on a CPU laptop it stops unless ARGS=--allow-cpu, ADR-019)
+	$(RUN_TRAIN) python -m src.training.train --config $(PARAMS) $(ARGS)
+
+train-smoke: ## Tiny end-to-end training check on real data (CPU OK; outputs in models/smoke/)
+	$(RUN_TRAIN) python -m src.training.train --config $(PARAMS) --smoke $(ARGS)

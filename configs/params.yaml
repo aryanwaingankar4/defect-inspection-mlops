@@ -1,4 +1,4 @@
-# Single source of seeds, sizes, hyperparameters, thresholds and gate rules (see CLAUDE.md).
+# Single source of seeds, sizes, hyperparameters, thresholds and gate rules.
 
 data:
   raw_dir: data/raw                              # DVC/git-ignored NEU images (ADR-015)

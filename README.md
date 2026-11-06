@@ -83,7 +83,3 @@ Setup instructions will be added as each phase lands. The target is `make setup 
 | `docs/ARCHITECTURE.md` | How the system works; folder rules |
 | `docs/DECISIONS.md` | Why each technical choice was made |
 | `docs/TEST_PLAN.md` | What "working" means |
-| `docs/MEMORY.md` | Current state of the project |
-| `docs/LEARNING.md` | What each task built, why it matters, and interview questions |
-| `TASKS.md` | Task breakdown by phase |
-| `CLAUDE.md` | Rules for AI-assisted development |

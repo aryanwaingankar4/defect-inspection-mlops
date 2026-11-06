@@ -38,3 +38,9 @@ mlflow.db
 Thumbs.db
 .vscode/
 .idea/
+
+# Private working notes: kept on the author's laptop only, never published
+/CLAUDE.md
+/TASKS.md
+/docs/MEMORY.md
+/docs/LEARNING.md

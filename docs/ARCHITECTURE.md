@@ -55,7 +55,7 @@
 defect-inspection-mlops/
 ├── configs/params.yaml        # seeds, hyperparameters, thresholds, gate rules
 ├── data/                      # DVC-tracked: raw/, splits/, feedback/, xsdd/
-├── docs/                      # PRD, architecture, decisions, test plan, memory, learning log, data + model cards
+├── docs/                      # PRD, architecture, decisions, test plan, data + model cards
 ├── src/
 │   ├── data/                  # download, split, pHash check, drift generators
 │   ├── training/              # train, evaluate, calibrate, export_onnx, quantize

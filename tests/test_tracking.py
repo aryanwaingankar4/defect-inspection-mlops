@@ -23,13 +23,14 @@ def tiny_model() -> torch.nn.Module:
     return torch.nn.Sequential(torch.nn.Flatten(), torch.nn.Linear(3 * 4 * 4, 2))
 
 
-def log_tiny_model(tracker: mt.RunTracker) -> str | None:
+def log_tiny_model(tracker: mt.RunTracker, register: bool = True) -> str | None:
     return tracker.log_model(
         tiny_model(),
         input_shape=(3, 4, 4),
         n_outputs=2,
         metadata={"classes": ["a", "b"]},
         pip_requirements=[f"torch=={torch.__version__.split('+')[0]}"],
+        register=register,
     )
 
 
@@ -176,3 +177,35 @@ def test_model_with_image_file_is_refused_before_upload(monkeypatch) -> None:
     with mt.RunTracker(CFG) as tracker, pytest.raises(ArtifactPolicyError, match="example.jpg"):
         log_tiny_model(tracker)
     assert uploads == []
+
+
+def test_model_is_registered_only_when_asked() -> None:
+    with mt.RunTracker(CFG) as tracker:
+        assert log_tiny_model(tracker, register=False) is None
+    assert MlflowClient().search_model_versions("name = 'm'") == []
+
+
+def test_run_keeps_given_training_times() -> None:
+    start, end = 1_700_000_000_000, 1_700_000_090_000
+    with mt.RunTracker(CFG, start_time_ms=start, end_time_ms=end) as tracker:
+        tracker.log_metrics({"x": 1.0})
+        run_id = tracker.run_id
+    info = MlflowClient().get_run(run_id).info
+    assert (info.start_time, info.end_time, info.status) == (start, end, "FINISHED")
+
+
+def test_find_finished_run_and_register_later() -> None:
+    assert mt.find_finished_run(CFG, "train_run_uid", "u1") is None  # no experiment yet
+    with pytest.raises(RuntimeError), mt.RunTracker(CFG) as tracker:
+        tracker.set_tags({"train_run_uid": "u1"})
+        raise RuntimeError("upload broke")  # FAILED runs do not count as published
+    assert mt.find_finished_run(CFG, "train_run_uid", "u1") is None
+
+    with mt.RunTracker(CFG) as tracker:
+        tracker.set_tags({"train_run_uid": "u1"})
+        log_tiny_model(tracker, register=False)
+        run_id = tracker.run_id
+    assert mt.find_finished_run(CFG, "train_run_uid", "u1") == run_id
+    assert mt.register_run_model(CFG, run_id) == "1"
+    assert mt.register_run_model(CFG, run_id) == "1"  # no duplicate version
+    assert len(MlflowClient().search_model_versions("name = 'm'")) == 1

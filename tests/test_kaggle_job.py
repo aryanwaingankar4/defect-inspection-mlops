@@ -62,6 +62,47 @@ def test_build_kernel_dir(tmp_path: Path) -> None:
     assert meta["code_file"] == kj.NOTEBOOK_FILE
 
 
+def code_of(notebook_text: str) -> str:
+    nb = json.loads(notebook_text)
+    return "\n".join("".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "code")
+
+
+def test_train_args_reach_the_training_command(tmp_path: Path) -> None:
+    model = "mobilenetv3_small_100.lamb_in1k"
+    out = kj.build_kernel_dir(PARAMS, "me", SHA, tmp_path / "k", kj.train_args(model))
+    code = code_of((out / kj.NOTEBOOK_FILE).read_text(encoding="utf-8"))
+    assert f'TRAIN_ARGS = "--model {model}".split()  # noqa' in code
+    assert "*TRAIN_ARGS," in code
+    ast.parse(code)  # the rendered notebook is valid Python
+
+    out = kj.build_kernel_dir(PARAMS, "me", SHA, tmp_path / "k2")
+    assert 'TRAIN_ARGS = "".split()  # noqa' in code_of((out / kj.NOTEBOOK_FILE).read_text("utf-8"))
+    assert kj.train_args(None) == []
+
+
+@pytest.mark.parametrize("bad", ['x" ; import os #', "a b", "a\\b", "", "-x"])
+def test_unsafe_train_args_are_refused(bad: str, tmp_path: Path) -> None:
+    with pytest.raises(kj.LaunchError):
+        kj.train_args(bad)
+    with pytest.raises(kj.LaunchError):
+        kj.build_kernel_dir(PARAMS, "me", SHA, tmp_path / "k", ["--model", bad])
+
+
+def test_template_has_no_credentials() -> None:
+    """ADR-020: the Kaggle job holds no secrets; the laptop publishes to MLflow."""
+    text = TEMPLATE.read_text(encoding="utf-8")
+    for word in ("kaggle_secrets", "UserSecretsClient", "get_secret", "MLFLOW", "DAGSHUB"):
+        assert word not in text, word
+
+
+def test_template_writes_where_register_reads() -> None:
+    """The launcher's output paths match kaggle.output_results / output_checkpoint."""
+    code = code_of(TEMPLATE.read_text(encoding="utf-8"))
+    k = PARAMS["kaggle"]
+    assert 'f"{OUT}/' + k["output_results"] + '"' in code
+    assert 'f"{OUT}/' + k["output_checkpoint"] + '"' in code
+
+
 def test_render_requires_every_placeholder() -> None:
     template = TEMPLATE.read_text(encoding="utf-8")
     with pytest.raises(ValueError, match="missing"):

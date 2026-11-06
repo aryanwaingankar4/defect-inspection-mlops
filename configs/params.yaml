@@ -44,7 +44,7 @@ train:                             # src/training/train.py; full runs on Kaggle 
     max_epochs: 1
     out_dir: models/smoke          # checkpoint + results of smoke runs; git-ignored
 
-tracking:                          # MLflow (ADR-018). Server from env MLFLOW_TRACKING_URI, else local_uri
+tracking:                          # MLflow (ADR-018), used on the laptop only (ADR-020). Server from env MLFLOW_TRACKING_URI, else local_uri
   experiment: neu-training
   registered_model: steel-defect-classifier
   smoke_experiment: neu-smoke      # --smoke runs never touch the real experiment or model name
@@ -52,7 +52,7 @@ tracking:                          # MLflow (ADR-018). Server from env MLFLOW_TR
   local_uri: sqlite:///mlruns/mlflow.db   # offline fallback (git-ignored); registry needs a DB store;
                                           # artifacts go to mlruns/artifacts next to it
 
-kaggle:                            # TASK-010: all full training runs on Kaggle GPU (ADR-019)
+kaggle:                            # TASK-010: all full training runs on Kaggle GPU (ADR-019), credential-free (ADR-020)
   dataset_slug: neu-det-private    # PRIVATE dataset owned by the account in ~/.kaggle/kaggle.json
   dataset_title: NEU-DET private copy
   kernel_slug: neu-train-launcher  # private notebook; logic-free launcher
@@ -64,7 +64,9 @@ kaggle:                            # TASK-010: all full training runs on Kaggle 
   notebook_template: notebooks/kaggle_train_launcher.ipynb
   staging_dir: build/kaggle-dataset   # git-ignored; never write into data/raw (would change its DVC hash)
   kernel_dir: build/kaggle-kernel     # rendered notebook + kernel-metadata.json
-  output_dir: build/kaggle-output     # downloaded run outputs
+  output_dir: build/kaggle-output     # downloaded run outputs (mirrors /kaggle/working)
+  output_results: results/train       # inside output_dir: val_metrics.json, curves, params.yaml
+  output_checkpoint: models/baseline/best.pt  # inside output_dir; `make register` publishes these (ADR-020)
 
 near_duplicates:
   hash_size: 8                     # pHash bits = hash_size^2 = 64

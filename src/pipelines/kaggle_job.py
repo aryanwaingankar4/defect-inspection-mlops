@@ -1,23 +1,26 @@
-"""Run training on Kaggle GPU from a pinned commit (TASK-010, ADR-019). Reused by TASK-028.
+"""Run training on Kaggle GPU from a pinned commit (TASK-010, ADR-019/020). Reused by TASK-028.
 
-    python -m src.pipelines.kaggle_job --config configs/params.yaml push [--no-run]
+    python -m src.pipelines.kaggle_job --config configs/params.yaml push [--model NAME] [--no-run]
     python -m src.pipelines.kaggle_job --config configs/params.yaml status
     python -m src.pipelines.kaggle_job --config configs/params.yaml output
 
 ``push`` refuses uncommitted changes and commits that are not on GitHub, renders the launcher
 notebook with the HEAD commit into ``kaggle.kernel_dir`` with a PRIVATE kernel-metadata.json
-(GPU T4, internet on, private dataset attached), and pushes it. The notebook itself has no
-logic: it clones the repo at that commit, installs the lockfile and runs ``src.training.train``.
+(GPU T4, internet on, private dataset attached), and pushes it, which starts the run. The
+notebook has no logic and no credentials: it clones the repo at that commit, installs the
+lockfile and runs ``src.training.train``, which only writes files. ``output`` downloads them;
+``make register`` then publishes the run to MLflow from the laptop (ADR-020).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +29,8 @@ from src.config import load_params
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NOTEBOOK_FILE = "kaggle_train_launcher.ipynb"
 METADATA_FILE = "kernel-metadata.json"
-PLACEHOLDERS = ("COMMIT", "REPO_URL", "UV_VERSION", "NUM_WORKERS")
+PLACEHOLDERS = ("COMMIT", "REPO_URL", "UV_VERSION", "NUM_WORKERS", "TRAIN_ARGS")
+SAFE_ARG = re.compile(r"(--)?[A-Za-z0-9][A-Za-z0-9_.\-]*")  # no spaces, quotes or backslashes
 
 Git = Callable[..., str]
 
@@ -52,17 +56,35 @@ def pinned_commit(run_git: Git = git) -> str:
 
 
 def render_notebook(template: str, values: Mapping[str, str]) -> str:
-    """Fill ``{{KEY}}`` placeholders; every placeholder must be filled."""
+    """Fill ``{{KEY}}`` placeholders in the cell sources; every placeholder must be filled.
+
+    Values are inserted into the parsed notebook (not the raw JSON text), so quotes in a
+    value cannot break the file.
+    """
     missing = [k for k in PLACEHOLDERS if k not in values]
     if missing:
         raise ValueError(f"missing values for {missing}")
-    text = template
-    for key in PLACEHOLDERS:
-        text = text.replace("{{" + key + "}}", str(values[key]))
-    if "{{" in text:
-        raise ValueError("unfilled placeholder left in the notebook")
-    json.loads(text)  # still a valid notebook
-    return text
+    nb = json.loads(template)
+    for cell in nb["cells"]:
+        source = "".join(cell["source"])
+        for key in PLACEHOLDERS:
+            source = source.replace("{{" + key + "}}", str(values[key]))
+        if "{{" in source:
+            raise ValueError("unfilled placeholder left in the notebook")
+        cell["source"] = source.splitlines(keepends=True)
+    return json.dumps(nb, indent=1, ensure_ascii=False) + "\n"
+
+
+def train_args(model: str | None) -> list[str]:
+    """Extra ``src.training.train`` arguments for this run.
+
+    They are rendered into a string literal in the notebook, so only plain tokens are allowed.
+    """
+    if model is None:
+        return []
+    if not SAFE_ARG.fullmatch(model):
+        raise LaunchError(f"invalid model name {model!r}")
+    return ["--model", model]
 
 
 def kernel_metadata(owner: str, k: Mapping[str, Any]) -> dict[str, Any]:
@@ -84,7 +106,13 @@ def kernel_metadata(owner: str, k: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_kernel_dir(params: Mapping[str, Any], owner: str, commit: str, out_dir: Path) -> Path:
+def build_kernel_dir(
+    params: Mapping[str, Any],
+    owner: str,
+    commit: str,
+    out_dir: Path,
+    extra_args: Sequence[str] = (),
+) -> Path:
     k = params["kaggle"]
     template = (REPO_ROOT / k["notebook_template"]).read_text(encoding="utf-8")
     values = {
@@ -92,7 +120,10 @@ def build_kernel_dir(params: Mapping[str, Any], owner: str, commit: str, out_dir
         "REPO_URL": k["repo_url"],
         "UV_VERSION": k["uv_version"],
         "NUM_WORKERS": str(k["num_workers"]),
+        "TRAIN_ARGS": " ".join(extra_args),  # split() back into a list in the notebook
     }
+    if not all(SAFE_ARG.fullmatch(arg) for arg in extra_args):
+        raise LaunchError(f"unsafe train arguments: {list(extra_args)}")
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
@@ -116,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     push = sub.add_parser("push", help="render the launcher and push it to Kaggle")
     push.add_argument("--no-run", action="store_true", help="save a version without running it")
+    push.add_argument("--model", help="timm model name for this run (default: train.model)")
     sub.add_parser("status", help="show the latest run status")
     sub.add_parser("output", help="download the latest run's output files")
     args = parser.parse_args(argv)
@@ -128,7 +160,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "push":
         commit = pinned_commit()
-        folder = build_kernel_dir(params, owner, commit, Path(k["kernel_dir"]))
+        extra = train_args(args.model)
+        folder = build_kernel_dir(params, owner, commit, Path(k["kernel_dir"]), extra)
         try:
             print("GPU quota:", api.quota_view())
         except Exception as exc:  # quota is informational only
@@ -139,7 +172,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"push failed: {error}", file=sys.stderr)
             return 1
         mode = "saved without running" if args.no_run else "running"
-        print(f"pushed {ref} at commit {commit[:7]} ({mode}): {getattr(resp, 'url', '')}")
+        print(f"pushed {ref} at commit {commit[:7]} ({mode}), train args {extra}")
+        print(f"  {getattr(resp, 'url', '')}")
     elif args.cmd == "status":
         print(api.kernels_status(ref))
     else:

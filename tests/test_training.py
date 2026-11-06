@@ -1,7 +1,7 @@
 """Training pipeline (TASK-008). Synthetic images only; no pretrained download; CPU."""
 
 import ast
-import copy
+import hashlib
 import json
 from pathlib import Path
 
@@ -10,65 +10,31 @@ import pytest
 from PIL import Image
 
 torch = pytest.importorskip("torch")
-pytest.importorskip("mlflow")
 
-from src.config import load_params  # noqa: E402
-from src.data.split import write_split_csv  # noqa: E402
 from src.serving.preprocess import PreprocessConfig, load_image, to_model_input  # noqa: E402
 from src.training import train as train_mod  # noqa: E402
 from src.training.augment import AugmentConfig, augment  # noqa: E402
 from src.training.dataset import SplitDataset, TestSetAccessError, class_names  # noqa: E402
 from src.training.metrics import accuracy, confusion_matrix, macro_f1, per_class_f1  # noqa: E402
+from tests.training_helpers import (  # noqa: E402
+    CLASSES,
+    PARAMS,
+    PARAMS_FILE,
+    PER_SPLIT,
+    REPO_ROOT,
+    make_synthetic_data,
+    tiny_params,
+)
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-PARAMS_FILE = REPO_ROOT / "configs" / "params.yaml"
-PARAMS = load_params(PARAMS_FILE)
 PRE = PreprocessConfig.from_params(PARAMS)
 AUG = AugmentConfig.from_params(PARAMS)
-CLASSES = ["alpha", "beta", "gamma"]
-PER_SPLIT = {"train_v1": 3, "val": 2, "test_frozen": 1}
 # Only the promotion gate and final evaluation may read test_frozen.
 ALLOW_TEST_ALLOWED = ("src/training/evaluate.py", "src/pipelines/")
 
 
 @pytest.fixture
 def synthetic_data(tmp_path: Path) -> tuple[Path, Path]:
-    """Tiny NEU-like tree + split CSV. Each class has its own brightness so it is learnable."""
-    raw = tmp_path / "raw"
-    rows = []
-    rng = np.random.default_rng(0)
-    for ci, cls in enumerate(CLASSES):
-        folder = raw / "NEU-DET" / "train" / "images" / cls
-        folder.mkdir(parents=True)
-        i = 0
-        for split, n in PER_SPLIT.items():
-            for _ in range(n):
-                base = 40 + 80 * ci
-                arr = np.clip(base + rng.normal(0, 10, (40, 40)), 0, 255).astype(np.uint8)
-                rel = f"NEU-DET/train/images/{cls}/{cls}_{i}.jpg"
-                Image.fromarray(arr).convert("RGB").save(raw / rel, quality=95)
-                rows.append((rel, cls, split))
-                i += 1
-    csv_path = tmp_path / "split.csv"
-    write_split_csv(rows, csv_path)
-    return raw, csv_path
-
-
-def tiny_params(raw: Path, csv_path: Path, out: Path, **train_overrides) -> dict:
-    p = copy.deepcopy(PARAMS)
-    p["data"] = {"raw_dir": raw.as_posix(), "split_file": csv_path.as_posix()}
-    p["preprocess"]["image_size"] = 32
-    p["train"].update(
-        pretrained=False,
-        batch_size=4,
-        max_epochs=1,
-        patience=1,
-        num_workers=0,
-        out_checkpoint=(out / "best.pt").as_posix(),
-        out_dir=(out / "results").as_posix(),
-        **train_overrides,
-    )
-    return p
+    return make_synthetic_data(tmp_path)
 
 
 # ---------------------------------------------------------------- dataset
@@ -225,6 +191,8 @@ def test_cli_overrides_paths_and_workers() -> None:
             "/kaggle/working/results",
             "--num-workers",
             "4",
+            "--model",
+            "mobilenetv3_small_100.lamb_in1k",
         ]
     )
     p = train_mod.apply_overrides(PARAMS, args)
@@ -232,7 +200,9 @@ def test_cli_overrides_paths_and_workers() -> None:
     assert p["train"]["out_checkpoint"] == "/kaggle/working/m.pt"
     assert p["train"]["out_dir"] == "/kaggle/working/results"
     assert p["train"]["num_workers"] == 4
+    assert p["train"]["model"] == "mobilenetv3_small_100.lamb_in1k"
     assert PARAMS["data"]["raw_dir"] != "/kaggle/input/neu"  # original params untouched
+    assert PARAMS["train"]["model"] != p["train"]["model"]
 
 
 def test_smoke_defaults_then_cli_wins() -> None:
@@ -283,17 +253,16 @@ def test_tiny_training_run_writes_outputs(synthetic_data, tmp_path) -> None:
     assert len((out / "training_curves.csv").read_text().splitlines()) == 2
     assert (out / "params.yaml").exists()
 
-    # Tracked in the (local, per-test) MLflow store under the real names (not smoke).
-    from mlflow import MlflowClient
-
-    tracked = saved["mlflow"]
-    assert tracked["experiment"] == PARAMS["tracking"]["experiment"]
-    assert tracked["registered_model"] == PARAMS["tracking"]["registered_model"]
-    run = MlflowClient().get_run(tracked["run_id"])
-    assert run.data.tags["git_commit"] == saved["provenance"]["git_commit"]
-    assert run.data.tags["data_fingerprint"] == saved["provenance"]["data_fingerprint"]
-    assert run.data.params["train.lr"] == str(PARAMS["train"]["lr"])
-    assert "best_val_macro_f1" in run.data.metrics
+    # Everything `make register` needs to publish the run later (ADR-020); no MLflow here.
+    assert "mlflow" not in saved
+    assert saved["model"] == PARAMS["train"]["model"] and saved["n_params"] > 0
+    assert len(saved["run_uid"]) == 32
+    timing = saved["timing"]
+    assert 0 < timing["started_at_ms"] <= timing["finished_at_ms"]
+    digest = hashlib.sha256((tmp_path / "best.pt").read_bytes()).hexdigest()
+    assert saved["checkpoint_sha256"] == digest
+    assert saved["provenance"]["runtime"] == "local"
+    assert {"git_dirty", "torch", "timm"} <= set(saved["provenance"])
 
     ckpt = torch.load(tmp_path / "best.pt", map_location="cpu", weights_only=True)
     assert ckpt["classes"] == CLASSES and ckpt["preprocess"]["image_size"] == 32
@@ -358,3 +327,22 @@ def test_write_curve_ignores_jupyter_mplbackend(tmp_path: Path) -> None:
     env = {**os.environ, "MPLBACKEND": "module://matplotlib_inline.backend_inline"}
     subprocess.run([sys.executable, "-c", code, str(tmp_path)], cwd=REPO_ROOT, env=env, check=True)
     assert (tmp_path / "training_curves.png").stat().st_size > 0
+
+
+def test_training_never_talks_to_mlflow() -> None:
+    """Kaggle jobs hold no credentials (ADR-020): train.py must not import MLflow or tracking."""
+    tree = ast.parse((REPO_ROOT / "src" / "training" / "train.py").read_text(encoding="utf-8"))
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported |= {a.name for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module)
+    assert not [m for m in imported if m.startswith(("mlflow", "src.tracking", "dagshub"))]
+
+
+def test_runtime_name(monkeypatch) -> None:
+    monkeypatch.delenv("KAGGLE_KERNEL_RUN_TYPE", raising=False)
+    assert train_mod.runtime_name() == "local"
+    monkeypatch.setenv("KAGGLE_KERNEL_RUN_TYPE", "Batch")
+    assert train_mod.runtime_name() == "kaggle"

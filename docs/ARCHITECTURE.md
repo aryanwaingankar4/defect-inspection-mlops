@@ -22,11 +22,13 @@
    - its OOD score flags it, OR
    - it is picked by the random audit sample of auto-accepted images.
 6. **Feedback.** Corrected labels are saved to `data/feedback/` and versioned with DVC. The reviewer is simulated in batch runs.
-7. **Retrain.** When N new labels exist, the Prefect `retrain_flow` on the laptop submits a Kaggle GPU job with `kaggle kernels push` (ADR-019). The job:
+7. **Retrain.** When N new labels exist, the Prefect `retrain_flow` on the laptop submits a Kaggle GPU job with `kaggle kernels push` (ADR-019). The job holds no credentials (ADR-020):
    - it trains from the base checkpoint on `train_v1 + all feedback`;
    - it calibrates on `val`;
    - it evaluates on `test_frozen`;
-   - it logs the candidate to DagsHub MLflow, where the laptop picks it up.
+   - it writes the candidate checkpoint, metrics and provenance to its output files.
+
+   The flow polls `kaggle kernels status`, downloads the output, and publishes it to DagsHub MLflow from the laptop (`src/tracking/publish.py`); only then is the candidate registered.
 8. **Promotion gate.** The candidate (`@challenger`) and `@champion` are compared on the same `test_frozen` images. See `DECISIONS.md` (ADR-005) for the rules. Every decision is written to `results/promotion_log.json`.
 9. **Deploy.** If the candidate passes, `@champion` moves to it and the model is exported to ONNX. On push to `main`, GitHub Actions (`.github/workflows/deploy-azure.yml`) runs CI, builds the image, pushes it to GitHub Container Registry and deploys the API and review UI Container Apps on Azure.
 10. **Monitor.**

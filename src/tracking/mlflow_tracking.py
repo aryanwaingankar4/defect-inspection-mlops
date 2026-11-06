@@ -1,4 +1,4 @@
-"""MLflow tracking (TASK-009, ADR-018). The only module in ``src/`` that talks to MLflow.
+"""MLflow tracking (TASK-009, ADR-018, ADR-020). Only ``src/tracking/`` talks to MLflow.
 
 Server: the ``MLFLOW_TRACKING_URI`` env var (DagsHub; credentials are read by MLflow itself
 from ``MLFLOW_TRACKING_USERNAME`` / ``MLFLOW_TRACKING_PASSWORD``). If it is unset, runs go to
@@ -108,24 +108,47 @@ def tensor_signature(input_shape: Sequence[int], n_outputs: int) -> ModelSignatu
     )
 
 
-class RunTracker:
-    """One MLflow run as a context manager. Marks the run FAILED if the block raises."""
+def _experiment_id(cfg: TrackingConfig, tracking_uri: str, *, create: bool) -> str | None:
+    mlflow.set_tracking_uri(tracking_uri)
+    exp = mlflow.get_experiment_by_name(cfg.experiment)
+    if exp is not None:
+        return exp.experiment_id
+    if not create:
+        return None
+    root = None if is_remote(tracking_uri) else _local_artifact_root(tracking_uri)
+    return mlflow.create_experiment(cfg.experiment, root)
 
-    def __init__(self, cfg: TrackingConfig) -> None:
+
+class RunTracker:
+    """One MLflow run as a context manager. Marks the run FAILED if the block raises.
+
+    ``start_time_ms`` / ``end_time_ms`` let a run published later (ADR-020) keep the real
+    training times instead of the time it was uploaded.
+    """
+
+    def __init__(
+        self,
+        cfg: TrackingConfig,
+        *,
+        start_time_ms: int | None = None,
+        end_time_ms: int | None = None,
+    ) -> None:
         self.cfg = cfg
         self.tracking_uri = resolve_tracking_uri(cfg.local_uri)
+        self.start_time_ms = start_time_ms
+        self.end_time_ms = end_time_ms
         self.experiment_id: str | None = None
         self.run_id: str | None = None
 
     def __enter__(self) -> RunTracker:
-        mlflow.set_tracking_uri(self.tracking_uri)
-        exp = mlflow.get_experiment_by_name(self.cfg.experiment)
-        if exp is None:
-            root = None if is_remote(self.tracking_uri) else _local_artifact_root(self.tracking_uri)
-            self.experiment_id = mlflow.create_experiment(self.cfg.experiment, root)
-        else:
-            self.experiment_id = exp.experiment_id
-        self.run_id = mlflow.start_run(experiment_id=self.experiment_id).info.run_id
+        self.experiment_id = _experiment_id(self.cfg, self.tracking_uri, create=True)
+        run_id = None
+        if self.start_time_ms is not None:
+            client = mlflow.MlflowClient()
+            run_id = client.create_run(
+                self.experiment_id, start_time=self.start_time_ms
+            ).info.run_id
+        self.run_id = mlflow.start_run(run_id=run_id, experiment_id=self.experiment_id).info.run_id
         return self
 
     def __exit__(
@@ -134,7 +157,10 @@ class RunTracker:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
-        mlflow.end_run(status="FAILED" if exc_type else "FINISHED")
+        status = "FAILED" if exc_type else "FINISHED"
+        mlflow.end_run(status=status)
+        if self.end_time_ms is not None and self.run_id is not None:
+            mlflow.MlflowClient().set_terminated(self.run_id, status, end_time=self.end_time_ms)
 
     @property
     def is_remote(self) -> bool:
@@ -169,8 +195,12 @@ class RunTracker:
         n_outputs: int,
         metadata: Mapping[str, Any],
         pip_requirements: Sequence[str],
+        register: bool,
     ) -> str | None:
-        """Policy-check, log and register a PyTorch model. Returns the registered version."""
+        """Policy-check and log a PyTorch model; register it only if ``register``.
+
+        Returns the registered version, or None if it was not registered.
+        """
         kwargs = {
             # MLflow 3.18 defaults to "pt2", which needs an input example; we never log one.
             "serialization_format": "pickle",
@@ -182,11 +212,42 @@ class RunTracker:
         info = mlflow.pytorch.log_model(
             model,
             name=MODEL_ARTIFACT_NAME,
-            registered_model_name=self.cfg.registered_model,
+            registered_model_name=self.cfg.registered_model if register else None,
             **kwargs,
         )
         version = info.registered_model_version
         return None if version is None else str(version)
+
+
+def find_finished_run(cfg: TrackingConfig, tag: str, value: str) -> str | None:
+    """Run id of a FINISHED run in the experiment whose ``tag`` equals ``value``, if any."""
+    tracking_uri = resolve_tracking_uri(cfg.local_uri)
+    exp_id = _experiment_id(cfg, tracking_uri, create=False)
+    if exp_id is None:
+        return None
+    runs = mlflow.MlflowClient().search_runs(
+        [exp_id], filter_string=f"tags.{tag} = '{value}' and attributes.status = 'FINISHED'"
+    )
+    return runs[0].info.run_id if runs else None
+
+
+def register_run_model(cfg: TrackingConfig, run_id: str) -> str:
+    """Register the model logged by ``run_id`` (once). Returns the version number."""
+    mlflow.set_tracking_uri(resolve_tracking_uri(cfg.local_uri))
+    client = mlflow.MlflowClient()
+    for v in client.search_model_versions(f"name = '{cfg.registered_model}'"):
+        if v.run_id == run_id:
+            return str(v.version)  # already registered: do not create a duplicate version
+    run = client.get_run(run_id)
+    models = [
+        m
+        for m in client.search_logged_models(experiment_ids=[run.info.experiment_id])
+        if m.source_run_id == run_id and m.name == MODEL_ARTIFACT_NAME
+    ]
+    if len(models) != 1:
+        raise RuntimeError(f"expected one logged model in run {run_id}, found {len(models)}")
+    version = mlflow.register_model(f"models:/{models[0].model_id}", cfg.registered_model)
+    return str(version.version)
 
 
 def check_model_files(model: Any, save_kwargs: Mapping[str, Any]) -> None:

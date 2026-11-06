@@ -4,7 +4,7 @@
 RUN := uv run --locked
 # Training deps (torch, timm, matplotlib) live in the `train` group.
 RUN_TRAIN := uv run --locked --group train
-# Training commands load secrets (MLflow / DagsHub) from .env if it exists. Tests never do.
+# Publishing to MLflow loads secrets (DagsHub) from .env if it exists. Training and tests never do.
 ENV_FILE := $(if $(wildcard .env),--env-file .env,)
 
 # Tests that need data, a model, a human, or a long time are skipped by `make test`.
@@ -16,7 +16,7 @@ RAW_DIR := data/raw
 PARAMS := configs/params.yaml
 
 .PHONY: help setup lock lint format test test-all check data split near-dups repro push pull train train-smoke \
-	kaggle-dataset kaggle-push kaggle-status kaggle-output
+	register kaggle-dataset kaggle-push kaggle-status kaggle-output
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -64,16 +64,20 @@ push: ## Upload DVC-tracked data to the private local remote (../dvc-storage)
 pull: ## Restore DVC-tracked data from the private local remote
 	$(RUN) dvc pull
 
-train: ## Full training (Kaggle GPU; on a CPU laptop it stops unless ARGS=--allow-cpu, ADR-019)
-	$(RUN_TRAIN) $(ENV_FILE) python -m src.training.train --config $(PARAMS) $(ARGS)
+train: ## Full training, files only (Kaggle GPU; on a CPU laptop it stops unless ARGS=--allow-cpu, ADR-019)
+	$(RUN_TRAIN) python -m src.training.train --config $(PARAMS) $(ARGS)
 
-train-smoke: ## Tiny end-to-end training check on real data (CPU OK; outputs in models/smoke/)
-	$(RUN_TRAIN) $(ENV_FILE) python -m src.training.train --config $(PARAMS) --smoke $(ARGS)
+train-smoke: ## Tiny end-to-end check on real data (CPU OK): train, then publish to the smoke experiment
+	$(RUN_TRAIN) python -m src.training.train --config $(PARAMS) --smoke $(ARGS)
+	$(RUN_TRAIN) $(ENV_FILE) python -m src.tracking.publish --config $(PARAMS) --smoke --register
+
+register: ## Publish the downloaded Kaggle run to MLflow. ARGS: --register, --role comparison, --results-dir DIR (ADR-020)
+	$(RUN_TRAIN) $(ENV_FILE) python -m src.tracking.publish --config $(PARAMS) $(ARGS)
 
 kaggle-dataset: ## Upload data/raw to Kaggle as a PRIVATE dataset and verify it stays private
 	$(RUN) python -m src.data.kaggle_dataset --config $(PARAMS)
 
-kaggle-push: ## Push the launcher pinned to HEAD (committed + pushed). Use ARGS=--no-run, then Save & Run All on kaggle.com (ADR-019)
+kaggle-push: ## Push + run the launcher pinned to HEAD (committed + pushed). ARGS: --model NAME, --no-run (ADR-020)
 	$(RUN) python -m src.pipelines.kaggle_job --config $(PARAMS) push $(ARGS)
 
 kaggle-status: ## Status of the latest Kaggle training run

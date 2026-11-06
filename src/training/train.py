@@ -6,8 +6,11 @@ Full training runs on Kaggle GPU only (ADR-019). On a laptop without a GPU, only
     python -m src.training.train --config configs/params.yaml [--smoke] [--allow-cpu]
         [--raw-dir DIR] [--split-file CSV] [--out-checkpoint PT] [--out-dir DIR] [--num-workers N]
 
-No MLflow yet (TASK-009): metrics, the training curve and provenance (git commit, DVC data
-hash, data fingerprint, params) are written to ``--out-dir``.
+Outputs: the checkpoint, ``val_metrics.json``, ``training_curves.csv/.png`` and the effective
+``params.yaml`` in ``--out-dir``. Everything is also tracked in MLflow (TASK-009): params,
+per-epoch metrics, provenance tags (git commit, DVC data hash, image fingerprint), the files
+above and the model, registered under ``tracking.registered_model`` (``--smoke`` runs use the
+separate smoke experiment and model name). Server: ``MLFLOW_TRACKING_URI``, else local ./mlruns.
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ import random
 import subprocess
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -36,6 +39,7 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from src.config import load_params
 from src.serving.preprocess import PreprocessConfig
+from src.tracking.mlflow_tracking import RunTracker, TrackingConfig
 from src.training.augment import AugmentConfig
 from src.training.dataset import SplitDataset, class_names
 from src.training.metrics import accuracy, macro_f1, per_class_f1
@@ -236,7 +240,7 @@ def write_curve(rows: list[dict[str, float]], out_dir: Path) -> None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    with (out_dir / "training_curve.csv").open("w", encoding="utf-8", newline="\n") as f:
+    with (out_dir / "training_curves.csv").open("w", encoding="utf-8", newline="\n") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0]), lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
@@ -250,11 +254,82 @@ def write_curve(rows: list[dict[str, float]], out_dir: Path) -> None:
     ax_f1.plot(epochs, [r["val_macro_f1"] for r in rows], marker="o")
     ax_f1.set(xlabel="epoch", ylabel="macro-F1", title="Validation macro-F1")
     fig.tight_layout()
-    fig.savefig(out_dir / "training_curve.png", dpi=100)
+    fig.savefig(out_dir / "training_curves.png", dpi=100)
     plt.close(fig)
 
 
 # ---------------------------------------------------------------- main loop
+
+
+def _save_checkpoint(path: Path, model: nn.Module, meta: dict[str, Any]) -> None:
+    torch.save(
+        {"format_version": CHECKPOINT_FORMAT, "state_dict": model.state_dict(), **meta}, path
+    )
+
+
+def _fit(
+    model: nn.Module,
+    loaders: tuple[DataLoader, DataLoader],
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    classes: Sequence[str],
+    t: dict[str, Any],
+    on_epoch: Callable[[dict[str, float]], None],
+    on_best: Callable[[int, float], None],
+) -> tuple[list[dict[str, float]], dict[str, Any], bool]:
+    """Epoch loop with early stopping. Returns (curve rows, best-epoch metrics, stopped early)."""
+    train_loader, val_loader = loaders
+    stopper = EarlyStopping(int(t["patience"]))
+    curve: list[dict[str, float]] = []
+    best: dict[str, Any] = {}
+    for epoch in range(1, int(t["max_epochs"]) + 1):
+        start = time.perf_counter()
+        train_loss = train_one_epoch(model, train_loader, optimizer, device)
+        val_loss, y_true, y_pred = predict(model, val_loader, device)
+        f1 = macro_f1(y_true, y_pred, len(classes))
+        row = {
+            "epoch": epoch,
+            "train_loss": train_loss,
+            "val_loss": val_loss,
+            "val_macro_f1": f1,
+            "seconds": time.perf_counter() - start,
+        }
+        curve.append(row)
+        on_epoch(row)
+        improved = stopper.update(f1)
+        print(
+            f"epoch {epoch:3d}  train_loss {train_loss:.4f}  val_loss {val_loss:.4f}  "
+            f"val_macro_f1 {f1:.4f}  {row['seconds']:.1f}s{'  *best*' if improved else ''}",
+            flush=True,
+        )
+        if improved:
+            per_class = per_class_f1(y_true, y_pred, len(classes)).tolist()
+            best = {
+                "epoch": epoch,
+                "val_loss": val_loss,
+                "val_macro_f1": f1,
+                "val_accuracy": accuracy(y_true, y_pred),
+                "val_per_class_f1": dict(zip(classes, per_class, strict=True)),
+            }
+            on_best(epoch, f1)
+        if stopper.should_stop:
+            break
+    return curve, best, stopper.should_stop
+
+
+def _write_outputs(
+    metrics: dict[str, Any], curve: list[dict[str, float]], params: dict[str, Any], out_dir: Path
+) -> list[tuple[Path, str | None]]:
+    """Write local outputs; return (file, MLflow artifact dir) pairs to log."""
+    (out_dir / "val_metrics.json").write_bytes((json.dumps(metrics, indent=2) + "\n").encode())
+    (out_dir / "params.yaml").write_bytes(yaml.safe_dump(params, sort_keys=False).encode())
+    write_curve(curve, out_dir)
+    return [
+        (out_dir / "val_metrics.json", None),
+        (out_dir / "params.yaml", "config"),
+        (out_dir / "training_curves.csv", None),
+        (out_dir / "training_curves.png", "plots"),
+    ]
 
 
 def run(
@@ -309,93 +384,105 @@ def run(
     ckpt_path.parent.mkdir(parents=True, exist_ok=True)
     out_dir.mkdir(parents=True, exist_ok=True)
     commit = git_commit(repo_root)
-    stopper = EarlyStopping(int(t["patience"]))
-    curve: list[dict[str, float]] = []
-    best: dict[str, Any] = {}
-
-    for epoch in range(1, int(t["max_epochs"]) + 1):
-        start = time.perf_counter()
-        train_loss = train_one_epoch(model, train_loader, optimizer, device)
-        val_loss, y_true, y_pred = predict(model, val_loader, device)
-        f1 = macro_f1(y_true, y_pred, len(classes))
-        seconds = time.perf_counter() - start
-        curve.append(
-            {
-                "epoch": epoch,
-                "train_loss": train_loss,
-                "val_loss": val_loss,
-                "val_macro_f1": f1,
-                "seconds": seconds,
-            }
-        )
-        improved = stopper.update(f1)
-        print(
-            f"epoch {epoch:3d}  train_loss {train_loss:.4f}  val_loss {val_loss:.4f}  "
-            f"val_macro_f1 {f1:.4f}  {seconds:.1f}s{'  *best*' if improved else ''}",
-            flush=True,
-        )
-        if improved:
-            best = {
-                "epoch": epoch,
-                "val_loss": val_loss,
-                "val_macro_f1": f1,
-                "val_accuracy": accuracy(y_true, y_pred),
-                "val_per_class_f1": dict(
-                    zip(classes, per_class_f1(y_true, y_pred, len(classes)).tolist(), strict=True)
-                ),
-            }
-            torch.save(
-                {
-                    "format_version": CHECKPOINT_FORMAT,
-                    "model_name": t["model"],
-                    "classes": list(classes),
-                    "state_dict": model.state_dict(),
-                    "preprocess": {
-                        k: list(v) if isinstance(v, tuple) else v
-                        for k, v in asdict(pre_cfg).items()
-                    },
-                    "best_epoch": epoch,
-                    "val_macro_f1": f1,
-                    "seed": int(t["seed"]),
-                    "git_commit": commit["sha"],
-                },
-                ckpt_path,
-            )
-        if stopper.should_stop:
-            break
-
-    metrics = {
-        "best_epoch": best["epoch"],
-        "val_macro_f1": best["val_macro_f1"],
-        "val_accuracy": best["val_accuracy"],
-        "val_loss": best["val_loss"],
-        "val_per_class_f1": best["val_per_class_f1"],
-        "epochs_run": len(curve),
-        "stopped_early": stopper.should_stop,
-        "classes": list(classes),
-        "n_train": len(train_ds),
-        "n_val": len(val_ds),
-        "smoke": smoke,
-        "device": device.type,
-        "checkpoint": ckpt_path.as_posix(),
-        "provenance": {
-            "git_commit": commit["sha"],
-            "git_dirty": commit["dirty"],
-            "dvc_data_md5": dvc_data_md5(repo_root),
-            "data_fingerprint": data_fingerprint(raw_dir, train_ds.paths + val_ds.paths),
-            "torch": torch.__version__,
-            "timm": timm.__version__,
-        },
-        "params": {"data": params["data"], "preprocess": params["preprocess"], "train": t},
+    provenance = {
+        "git_commit": commit["sha"],
+        "git_dirty": commit["dirty"],
+        "dvc_data_md5": dvc_data_md5(repo_root),
+        "data_fingerprint": data_fingerprint(raw_dir, train_ds.paths + val_ds.paths),
+        "torch": torch.__version__,
+        "timm": timm.__version__,
     }
-    (out_dir / "val_metrics.json").write_bytes(
-        (json.dumps(metrics, indent=2) + "\n").encode("utf-8")
-    )
-    write_curve(curve, out_dir)
+    preprocess = {k: list(v) if isinstance(v, tuple) else v for k, v in asdict(pre_cfg).items()}
+    ckpt_meta = {
+        "model_name": t["model"],
+        "classes": list(classes),
+        "preprocess": preprocess,
+        "seed": int(t["seed"]),
+        "git_commit": commit["sha"],
+    }
+    tracking = TrackingConfig.from_params(params, smoke=smoke)
+
+    with RunTracker(tracking) as tracker:
+        tracker.log_params({k: params[k] for k in ("data", "preprocess", "train")})
+        tracker.set_tags(
+            {
+                **provenance,
+                "device": device.type,
+                "smoke": smoke,
+                "n_train": len(train_ds),
+                "n_val": len(val_ds),
+            }
+        )
+
+        def on_epoch(row: dict[str, float]) -> None:
+            values = {k: v for k, v in row.items() if k != "epoch"}
+            tracker.log_metrics(values, step=int(row["epoch"]))
+
+        def on_best(epoch: int, f1: float) -> None:
+            meta = {**ckpt_meta, "best_epoch": epoch, "val_macro_f1": f1}
+            _save_checkpoint(ckpt_path, model, meta)
+
+        curve, best, stopped_early = _fit(
+            model, (train_loader, val_loader), optimizer, device, classes, t, on_epoch, on_best
+        )
+        metrics = {
+            "best_epoch": best["epoch"],
+            "val_macro_f1": best["val_macro_f1"],
+            "val_accuracy": best["val_accuracy"],
+            "val_loss": best["val_loss"],
+            "val_per_class_f1": best["val_per_class_f1"],
+            "epochs_run": len(curve),
+            "stopped_early": stopped_early,
+            "classes": list(classes),
+            "n_train": len(train_ds),
+            "n_val": len(val_ds),
+            "smoke": smoke,
+            "device": device.type,
+            "checkpoint": ckpt_path.as_posix(),
+            "provenance": provenance,
+            "mlflow": {
+                "experiment": tracking.experiment,
+                "run_id": tracker.run_id,
+                "run_url": tracker.run_url,
+                "registered_model": tracking.registered_model,
+            },
+            "params": {"data": params["data"], "preprocess": params["preprocess"], "train": t},
+        }
+        # Local files first, so nothing is lost if the upload fails.
+        files = _write_outputs(metrics, curve, params, out_dir)
+        tracker.log_metrics(
+            {
+                "best_epoch": best["epoch"],
+                "best_val_macro_f1": best["val_macro_f1"],
+                "best_val_accuracy": best["val_accuracy"],
+                "best_val_loss": best["val_loss"],
+                **{f"best_val_f1.{c}": f for c, f in best["val_per_class_f1"].items()},
+            }
+        )
+        for path, artifact_dir in files:
+            tracker.log_file(path, artifact_dir)
+
+        state = torch.load(ckpt_path, map_location="cpu", weights_only=True)["state_dict"]
+        model = model.cpu().eval()
+        model.load_state_dict(state)  # register the best epoch, not the last one
+        metrics["mlflow"]["registered_version"] = tracker.log_model(
+            model,
+            input_shape=(3, pre_cfg.image_size, pre_cfg.image_size),
+            n_outputs=len(classes),
+            metadata={**ckpt_meta, "checkpoint_format": CHECKPOINT_FORMAT, "smoke": smoke},
+            pip_requirements=[
+                f"torch=={torch.__version__.split('+')[0]}",
+                f"timm=={timm.__version__}",
+            ],
+        )
     return metrics
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        # MLflow prints an emoji when a run ends; a cp1252 Windows console would crash on it.
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
     args = parse_args(argv)
     params = apply_overrides(load_params(args.config), args)
     device = resolve_device()
@@ -403,9 +490,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_NEEDS_GPU
     print(f"device: {device.type}{'  (smoke run)' if args.smoke else ''}", flush=True)
     metrics = run(params, device, smoke=args.smoke)
+    tracked = metrics["mlflow"]
     print(
         f"best epoch {metrics['best_epoch']}: val macro-F1 {metrics['val_macro_f1']:.4f}; "
-        f"outputs in {params['train']['out_dir']} and {metrics['checkpoint']}"
+        f"outputs in {params['train']['out_dir']} and {metrics['checkpoint']}\n"
+        f"MLflow run: {tracked['run_url']}\n"
+        f"registered: {tracked['registered_model']} version {tracked['registered_version']}"
     )
     return 0
 

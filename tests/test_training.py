@@ -10,6 +10,7 @@ import pytest
 from PIL import Image
 
 torch = pytest.importorskip("torch")
+pytest.importorskip("mlflow")
 
 from src.config import load_params  # noqa: E402
 from src.data.split import write_split_csv  # noqa: E402
@@ -278,8 +279,21 @@ def test_tiny_training_run_writes_outputs(synthetic_data, tmp_path) -> None:
     assert set(saved["val_per_class_f1"]) == set(CLASSES)
     assert {"git_commit", "dvc_data_md5", "data_fingerprint"} <= set(saved["provenance"])
     assert saved["params"]["train"]["seed"] == PARAMS["train"]["seed"]
-    assert (out / "training_curve.png").stat().st_size > 0
-    assert len((out / "training_curve.csv").read_text().splitlines()) == 2
+    assert (out / "training_curves.png").stat().st_size > 0
+    assert len((out / "training_curves.csv").read_text().splitlines()) == 2
+    assert (out / "params.yaml").exists()
+
+    # Tracked in the (local, per-test) MLflow store under the real names (not smoke).
+    from mlflow import MlflowClient
+
+    tracked = saved["mlflow"]
+    assert tracked["experiment"] == PARAMS["tracking"]["experiment"]
+    assert tracked["registered_model"] == PARAMS["tracking"]["registered_model"]
+    run = MlflowClient().get_run(tracked["run_id"])
+    assert run.data.tags["git_commit"] == saved["provenance"]["git_commit"]
+    assert run.data.tags["data_fingerprint"] == saved["provenance"]["data_fingerprint"]
+    assert run.data.params["train.lr"] == str(PARAMS["train"]["lr"])
+    assert "best_val_macro_f1" in run.data.metrics
 
     ckpt = torch.load(tmp_path / "best.pt", map_location="cpu", weights_only=True)
     assert ckpt["classes"] == CLASSES and ckpt["preprocess"]["image_size"] == 32

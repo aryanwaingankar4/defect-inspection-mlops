@@ -1,3 +1,4 @@
+import ast
 import re
 from pathlib import Path
 
@@ -74,3 +75,21 @@ def test_no_direct_mlflow_artifact_calls_outside_tracking() -> None:
         rel = path.relative_to(REPO_ROOT)
         offenders += [f"{rel}: {m.group(0)}" for m in DIRECT_CALL.finditer(text)]
     assert offenders == [], f"Use src.tracking.artifact_policy.safe_log_artifact: {offenders}"
+
+
+def test_only_src_tracking_imports_mlflow() -> None:
+    """src/tracking/ is the only place that talks to MLflow (log_model, log_dict, ...)."""
+    offenders = []
+    for path in (REPO_ROOT / "src").rglob("*.py"):
+        if "tracking" in path.relative_to(REPO_ROOT / "src").parts:
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                names = [node.module]
+            offenders += [
+                f"{path.relative_to(REPO_ROOT)}: {n}" for n in names if n.split(".")[0] == "mlflow"
+            ]
+    assert offenders == [], f"Use src.tracking.mlflow_tracking instead: {offenders}"

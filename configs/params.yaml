@@ -44,6 +44,14 @@ train:                             # src/training/train.py; full runs on Kaggle 
     max_epochs: 1
     out_dir: models/smoke          # checkpoint + results of smoke runs; git-ignored
 
+tracking:                          # MLflow (ADR-018). Server from env MLFLOW_TRACKING_URI, else local_uri
+  experiment: neu-training
+  registered_model: steel-defect-classifier
+  smoke_experiment: neu-smoke      # --smoke runs never touch the real experiment or model name
+  smoke_registered_model: steel-defect-classifier-smoke
+  local_uri: sqlite:///mlruns/mlflow.db   # offline fallback (git-ignored); registry needs a DB store;
+                                          # artifacts go to mlruns/artifacts next to it
+
 near_duplicates:
   hash_size: 8                     # pHash bits = hash_size^2 = 64
   max_distance: 8                  # cross-split pairs with Hamming distance <= this go to the CSV

@@ -4,6 +4,8 @@
 RUN := uv run --locked
 # Training deps (torch, timm, matplotlib) live in the `train` group.
 RUN_TRAIN := uv run --locked --group train
+# Training commands load secrets (MLflow / DagsHub) from .env if it exists. Tests never do.
+ENV_FILE := $(if $(wildcard .env),--env-file .env,)
 
 # Tests that need data, a model, a human, or a long time are skipped by `make test`.
 FAST_TESTS := not slow and not manual and not needs_data and not needs_model
@@ -62,7 +64,7 @@ pull: ## Restore DVC-tracked data from the private local remote
 	$(RUN) dvc pull
 
 train: ## Full training (Kaggle GPU; on a CPU laptop it stops unless ARGS=--allow-cpu, ADR-019)
-	$(RUN_TRAIN) python -m src.training.train --config $(PARAMS) $(ARGS)
+	$(RUN_TRAIN) $(ENV_FILE) python -m src.training.train --config $(PARAMS) $(ARGS)
 
 train-smoke: ## Tiny end-to-end training check on real data (CPU OK; outputs in models/smoke/)
-	$(RUN_TRAIN) python -m src.training.train --config $(PARAMS) --smoke $(ARGS)
+	$(RUN_TRAIN) $(ENV_FILE) python -m src.training.train --config $(PARAMS) --smoke $(ARGS)

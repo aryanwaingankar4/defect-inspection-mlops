@@ -133,3 +133,160 @@ def percentile_interval(values: np.ndarray, level: float) -> tuple[np.ndarray, n
     """Two-sided percentile interval along axis 0 (e.g. level 0.95 -> 2.5th and 97.5th)."""
     tail = (1.0 - level) / 2.0 * 100.0
     return np.percentile(values, tail, axis=0), np.percentile(values, 100.0 - tail, axis=0)
+
+
+# ---------------------------------------------------------------- calibration (TASK-012)
+
+CALIBRATION_SCORES = ("ece", "nll", "brier")  # all: lower is better
+
+
+def softmax(logits: np.ndarray, temperature: float = 1.0) -> np.ndarray:
+    """Row-wise softmax of ``logits / temperature`` (numerically stable)."""
+    z = np.asarray(logits, dtype=np.float64) / float(temperature)
+    z = z - z.max(axis=1, keepdims=True)
+    e = np.exp(z)
+    return e / e.sum(axis=1, keepdims=True)
+
+
+def nll(probs: np.ndarray, y_true: np.ndarray) -> float:
+    """Mean negative log-likelihood of the true class (probabilities clipped at 1e-12)."""
+    p = np.asarray(probs)[np.arange(len(y_true)), np.asarray(y_true, dtype=np.int64)]
+    return float(-np.log(np.clip(p, 1e-12, 1.0)).mean())
+
+
+def brier(probs: np.ndarray, y_true: np.ndarray) -> float:
+    """Multi-class Brier score: mean over images of the squared error to the one-hot label."""
+    probs = np.asarray(probs, dtype=np.float64)
+    onehot = np.zeros_like(probs)
+    onehot[np.arange(len(y_true)), np.asarray(y_true, dtype=np.int64)] = 1.0
+    return float(((probs - onehot) ** 2).sum(axis=1).mean())
+
+
+def reliability_bins(probs: np.ndarray, y_true: np.ndarray, n_bins: int) -> dict[str, np.ndarray]:
+    """Top-label confidence in ``n_bins`` equal-width bins over (0, 1].
+
+    Returns per bin: ``count``, mean ``confidence`` and ``accuracy`` (NaN for empty bins).
+    """
+    probs = np.asarray(probs)
+    conf = probs.max(axis=1)
+    correct = (probs.argmax(axis=1) == np.asarray(y_true)).astype(np.float64)
+    # Bin i holds (i/n, (i+1)/n]; confidence 0 cannot happen for a top label.
+    idx = np.clip(np.ceil(conf * n_bins).astype(np.int64) - 1, 0, n_bins - 1)
+    count = np.bincount(idx, minlength=n_bins)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mean_conf = np.bincount(idx, weights=conf, minlength=n_bins) / count
+        acc = np.bincount(idx, weights=correct, minlength=n_bins) / count
+    return {"count": count, "confidence": mean_conf, "accuracy": acc}
+
+
+def ece(probs: np.ndarray, y_true: np.ndarray, n_bins: int) -> float:
+    """Expected calibration error: count-weighted mean |accuracy - confidence| over bins."""
+    b = reliability_bins(probs, y_true, n_bins)
+    used = b["count"] > 0
+    gaps = np.abs(b["accuracy"][used] - b["confidence"][used])
+    return float((gaps * b["count"][used]).sum() / b["count"].sum())
+
+
+def calibration_scores(probs: np.ndarray, y_true: np.ndarray, n_bins: int) -> dict[str, float]:
+    return {
+        "ece": ece(probs, y_true, n_bins),
+        "nll": nll(probs, y_true),
+        "brier": brier(probs, y_true),
+    }
+
+
+def _nll_at(logits: np.ndarray, y: np.ndarray, temperatures: np.ndarray) -> np.ndarray:
+    """Mean NLL of ``softmax(logits / T)`` for each T (vectorised over T)."""
+    z = logits[None, :, :] / temperatures[:, None, None]
+    zmax = z.max(axis=2, keepdims=True)
+    log_norm = np.log(np.exp(z - zmax).sum(axis=2)) + zmax[..., 0]
+    true_z = z[:, np.arange(len(y)), y]
+    return (log_norm - true_z).mean(axis=1)
+
+
+def fit_temperature(
+    logits: np.ndarray, y_true: np.ndarray, t_min: float, t_max: float, grid_size: int
+) -> tuple[float, bool]:
+    """T in [t_min, t_max] minimising the mean NLL; also whether it sits on a bound.
+
+    A log-spaced grid finds the best region; golden-section search on log T refines it
+    between the neighbouring grid points. NumPy only.
+    """
+    if not 0 < t_min < 1 < t_max:
+        raise ValueError("need 0 < t_min < 1 < t_max")
+    logits = np.asarray(logits, dtype=np.float64)
+    y = np.asarray(y_true, dtype=np.int64)
+    log_grid = np.linspace(np.log(t_min), np.log(t_max), grid_size)
+    losses = _nll_at(logits, y, np.exp(log_grid))
+    i = int(np.argmin(losses))
+    if i in (0, grid_size - 1):
+        return float(np.exp(log_grid[i])), True
+    lo, hi = log_grid[i - 1], log_grid[i + 1]
+    ratio = (np.sqrt(5.0) - 1.0) / 2.0
+    for _ in range(60):
+        a, b = hi - ratio * (hi - lo), lo + ratio * (hi - lo)
+        fa, fb = _nll_at(logits, y, np.exp(np.array([a, b])))
+        if fa < fb:
+            hi = b
+        else:
+            lo = a
+    return float(np.exp((lo + hi) / 2.0)), False
+
+
+def stratified_group_folds(
+    labels: np.ndarray, unit_ids: np.ndarray, k: int, seed: int
+) -> np.ndarray:
+    """Fold number (0..k-1) per item. Units (e.g. near-copy groups) stay in one fold; within
+    each class the units are shuffled and dealt to the folds in turn."""
+    labels, unit_ids = np.asarray(labels), np.asarray(unit_ids)
+    rng = np.random.default_rng(seed)
+    folds = np.full(len(labels), -1, dtype=np.int64)
+    for cls in np.unique(labels):
+        units = np.unique(unit_ids[labels == cls])
+        for j, u in enumerate(rng.permutation(units)):
+            folds[unit_ids == u] = j % k
+    if (folds < 0).any():
+        raise ValueError("every item needs a unit")
+    return folds
+
+
+def compare_calibration(
+    y_true: np.ndarray,
+    before: np.ndarray,
+    after: np.ndarray,
+    samples: Sequence[np.ndarray],
+    n_bins: int,
+    level: float,
+) -> dict[str, Any]:
+    """Scores before and after calibration and the paired change (after - before), each with
+    a percentile bootstrap interval over the same resamples, plus a plain verdict per score."""
+    y_true = np.asarray(y_true, dtype=np.int64)
+    point_b, point_a = (
+        calibration_scores(before, y_true, n_bins),
+        calibration_scores(after, y_true, n_bins),
+    )
+    boot = {s: {"before": [], "after": []} for s in CALIBRATION_SCORES}
+    for idx in samples:
+        sb = calibration_scores(before[idx], y_true[idx], n_bins)
+        sa = calibration_scores(after[idx], y_true[idx], n_bins)
+        for s in CALIBRATION_SCORES:
+            boot[s]["before"].append(sb[s])
+            boot[s]["after"].append(sa[s])
+    out: dict[str, Any] = {"before": {}, "after": {}, "change": {}, "verdict": {}}
+    for s in CALIBRATION_SCORES:
+        b, a = np.asarray(boot[s]["before"]), np.asarray(boot[s]["after"])
+        for key, point, values in (
+            ("before", point_b[s], b),
+            ("after", point_a[s], a),
+            ("change", point_a[s] - point_b[s], a - b),
+        ):
+            lo, hi = percentile_interval(values, level)
+            out[key][s] = {"value": float(point), "ci_low": float(lo), "ci_high": float(hi)}
+        ch = out["change"][s]
+        if ch["ci_high"] < 0:
+            out["verdict"][s] = "lower after calibration (interval of the change is below 0)"
+        elif ch["ci_low"] > 0:
+            out["verdict"][s] = "higher after calibration (interval of the change is above 0)"
+        else:
+            out["verdict"][s] = "no clear change: the interval of the change includes 0"
+    return out

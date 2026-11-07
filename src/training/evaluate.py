@@ -10,13 +10,19 @@ Before any test image is read, it checks that:
   - the split is clean (committed near-copy report: 0 confirmed near-copies across splits);
   - the ADR-022 comparison exists for this split, is not significant, and lists the models in
     the same order as ``compare_val.models`` with the pre-declared main model first;
-  - each checkpoint is the one its results and the ADR-022 report were made with.
+  - each checkpoint is the one its results and the ADR-022 report were made with;
+  - each model has a calibration fitted on ``val`` of this split with this checkpoint.
 
 Per model, in ``evaluate.out_dir/<name>/``: ``test_metrics.json`` (accuracy, macro-F1,
 per-class precision/recall/F1, confusion matrix, each metric with a bootstrap interval),
 ``test_predictions.csv`` (file names only) and two confusion-matrix plots. The interval is a
 cluster bootstrap stratified by class: confirmed near-copies inside ``test_frozen`` (ADR-021)
 are resampled together, because overlapping crops are not independent test cases.
+
+Calibration (TASK-012, ADR-006): the temperature T fitted on ``val`` by ``calibrate.py`` is
+read from ``<results_dir>/calibration.json`` and only APPLIED here (never fitted on test). The
+report adds ECE / NLL / Brier before and after T with bootstrap intervals and two reliability
+diagrams; the predictions CSV gets ``calibrated_confidence``. Predicted classes do not change.
 
 ``--log-mlflow`` adds the test metrics, tags and allowlisted files to each model's existing
 MLflow run (from ``mlflow_run.json``); without it nothing talks to MLflow.
@@ -48,16 +54,20 @@ from src.training.compare_val import ModelSpec, load_checkpoint, specs_from_para
 from src.training.dataset import PROTECTED_SPLIT, SplitDataset
 from src.training.metrics import (
     bootstrap_metrics,
+    compare_calibration,
     confusion_matrix,
     grouped_bootstrap_indices,
     per_class_precision_recall_f1,
     percentile_interval,
+    reliability_bins,
+    softmax,
 )
 from src.training.train import git_commit, sha256_file
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ROLES = ("main", "lighter alternative")  # ADR-022: first model = main, second = alternative
 PLOT_DIR = "plots"  # MLflow artifact folder for allowlisted plots (ADR-018)
+CALIBRATION_FILE = "calibration.json"  # in each model's results_dir, by calibrate.py
 
 
 class EvalError(RuntimeError):
@@ -73,6 +83,7 @@ class EvalConfig:
     out_dir: Path
     pairs_file: Path
     min_pixel_corr: float
+    n_bins: int
 
     @classmethod
     def from_params(cls, params: Mapping[str, Any]) -> EvalConfig:
@@ -86,6 +97,7 @@ class EvalConfig:
             out_dir=Path(e["out_dir"]),
             pairs_file=Path(nd["pairs_file"]),
             min_pixel_corr=float(nd["confirm_pixel_corr"]),
+            n_bins=int(params["calibrate"]["n_bins"]),
         )
 
 
@@ -116,6 +128,26 @@ def check_model_choice(params: Mapping[str, Any], root: Path = REPO_ROOT) -> lis
         if not (actual == m["checkpoint_sha256"] == recorded["checkpoint_sha256"]):
             raise EvalError(f"{spec.checkpoint} is not the checkpoint compared under ADR-022")
     return specs
+
+
+def load_temperature(
+    params: Mapping[str, Any], spec: ModelSpec, root: Path = REPO_ROOT
+) -> tuple[float, Path]:
+    """T of ``spec``, fitted on val of the current split with this checkpoint (TASK-012)."""
+    path = root / spec.results_dir / CALIBRATION_FILE
+    if not path.is_file():
+        raise EvalError(f"no calibration for {spec.name}: run `make calibrate` first")
+    cal = json.loads(path.read_text(encoding="utf-8"))
+    fitted, split_csv = cal.get("fitted_on", {}), root / params["data"]["split_file"]
+    if fitted.get("split") != "val" or fitted.get("split_file") != split_csv.name:
+        raise EvalError(f"the calibration of {spec.name} was not fitted on val of this split")
+    if fitted.get("split_sha256") != sha256_file(split_csv):
+        raise EvalError(f"the split file changed after {spec.name} was calibrated")
+    if cal.get("checkpoint_sha256") != sha256_file(root / spec.checkpoint):
+        raise EvalError(f"the calibration of {spec.name} is for another checkpoint")
+    if cal.get("at_bound") is not False:
+        raise EvalError(f"the temperature of {spec.name} sits on its range bound")
+    return float(cal["temperature"]), path
 
 
 def check_split(params: Mapping[str, Any], root: Path = REPO_ROOT) -> None:
@@ -159,14 +191,18 @@ def near_copy_groups_within(paths: Sequence[str], cfg: EvalConfig) -> list[list[
 
 
 @torch.inference_mode()
-def predict_proba(model: nn.Module, loader: DataLoader) -> tuple[np.ndarray, np.ndarray]:
-    """True labels and softmax probabilities, in loader order (CPU)."""
+def predict_outputs(
+    model: nn.Module, loader: DataLoader
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """True labels, logits and softmax probabilities (T = 1), in loader order (CPU)."""
     model.eval()
-    labels, probs = [], []
+    labels, logits, probs = [], [], []
     for x, y in loader:
-        probs.append(torch.softmax(model(x), dim=1).numpy())
+        out = model(x)
+        logits.append(out.numpy())
+        probs.append(torch.softmax(out, dim=1).numpy())
         labels.append(y.numpy())
-    return np.concatenate(labels), np.concatenate(probs)
+    return np.concatenate(labels), np.concatenate(logits), np.concatenate(probs)
 
 
 # ---------------------------------------------------------------- metrics
@@ -209,7 +245,78 @@ def metrics_report(
     }
 
 
+def reliability_json(probs: np.ndarray, y_true: np.ndarray, n_bins: int) -> dict[str, Any]:
+    """Reliability-diagram data as JSON (empty bins: null)."""
+    b = reliability_bins(probs, y_true, n_bins)
+
+    def clean(a: np.ndarray) -> list[float | None]:
+        return [None if np.isnan(v) else float(v) for v in a]
+
+    return {
+        "n_bins": n_bins,
+        "count": b["count"].tolist(),
+        "confidence": clean(b["confidence"]),
+        "accuracy": clean(b["accuracy"]),
+    }
+
+
+def calibration_report(
+    y_true: np.ndarray,
+    before: np.ndarray,
+    after: np.ndarray,
+    samples: Sequence[np.ndarray],
+    n_bins: int,
+    level: float,
+) -> dict[str, Any]:
+    """ECE / NLL / Brier before and after T, the paired change with intervals, verdicts and
+    the reliability-diagram data. Says how many errors the scores rest on."""
+    if not np.array_equal(before.argmax(axis=1), after.argmax(axis=1)):
+        raise EvalError("temperature scaling changed a predicted class")  # impossible for T > 0
+    n_errors = int((before.argmax(axis=1) != y_true).sum())
+    return {
+        "n_images": int(len(y_true)),
+        "n_errors": n_errors,
+        **compare_calibration(y_true, before, after, samples, n_bins, level),
+        "reliability_before": reliability_json(before, y_true, n_bins),
+        "reliability_after": reliability_json(after, y_true, n_bins),
+        "caution": (
+            f"Only {n_errors} of {len(y_true)} images are misclassified, so NLL and ECE rest "
+            "mostly on those few images; treat small changes as uncertain."
+        ),
+    }
+
+
 # ---------------------------------------------------------------- outputs
+
+
+def plot_reliability(bins: Mapping[str, Any], ece_value: float, path: Path, title: str) -> None:
+    """Accuracy vs mean confidence per bin (top) and images per bin (bottom). No images."""
+    os.environ["MPLBACKEND"] = "Agg"
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    n = int(bins["n_bins"])
+    edges = np.linspace(0.0, 1.0, n + 1)
+    centers, width = (edges[:-1] + edges[1:]) / 2, 1.0 / n
+    count = np.array(bins["count"])
+    acc = np.array([np.nan if v is None else v for v in bins["accuracy"]], dtype=float)
+    conf = np.array([np.nan if v is None else v for v in bins["confidence"]], dtype=float)
+    fig, (ax, ax_n) = plt.subplots(
+        2, 1, figsize=(6, 7), sharex=True, gridspec_kw={"height_ratios": [3, 1]}
+    )
+    used = count > 0
+    ax.bar(centers[used], acc[used], width=width, edgecolor="black", label="accuracy in bin")
+    ax.plot(conf[used], acc[used], "o", color="tab:orange", label="mean confidence in bin")
+    ax.plot([0, 1], [0, 1], "--", color="gray", label="perfect calibration")
+    ax.set(ylabel="accuracy", ylim=(0, 1.02), title=f"{title}\nECE = {ece_value:.4f}")
+    ax.legend(loc="upper left", fontsize=8)
+    ax_n.bar(centers[used], count[used], width=width, edgecolor="black", color="gray")
+    ax_n.set(xlabel="confidence (top class)", ylabel="images", yscale="log", xlim=(0, 1))
+    fig.tight_layout()
+    fig.savefig(path, dpi=100)
+    plt.close(fig)
 
 
 def plot_confusion(cm: np.ndarray, classes: Sequence[str], path: Path, title: str) -> None:
@@ -239,14 +346,21 @@ def plot_confusion(cm: np.ndarray, classes: Sequence[str], path: Path, title: st
 
 
 def write_predictions(
-    path: Path, paths: Sequence[str], y_true: np.ndarray, probs: np.ndarray, classes: Sequence[str]
+    path: Path,
+    paths: Sequence[str],
+    y_true: np.ndarray,
+    probs: np.ndarray,
+    calibrated: np.ndarray,
+    classes: Sequence[str],
 ) -> None:
+    """One row per image (file name only): raw and temperature-scaled top-class confidence."""
     pred = probs.argmax(axis=1)
+    rows = zip(paths, y_true, pred, probs.max(axis=1), calibrated.max(axis=1), strict=True)
     with path.open("w", encoding="utf-8", newline="\n") as f:
         w = csv.writer(f, lineterminator="\n")
-        w.writerow(["path", "true", "pred", "confidence", "correct"])
-        for p, t, y, conf in zip(paths, y_true, pred, probs.max(axis=1), strict=True):
-            w.writerow([p, classes[t], classes[y], f"{conf:.4f}", int(t == y)])
+        w.writerow(["path", "true", "pred", "confidence", "calibrated_confidence", "correct"])
+        for p, t, y, conf, cal in rows:
+            w.writerow([p, classes[t], classes[y], f"{conf:.4f}", f"{cal:.4f}", int(t == y)])
 
 
 def write_outputs(
@@ -255,6 +369,7 @@ def write_outputs(
     paths: Sequence[str],
     y_true: np.ndarray,
     probs: np.ndarray,
+    calibrated: np.ndarray,
     classes: Sequence[str],
 ) -> dict[str, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -263,9 +378,20 @@ def write_outputs(
         "predictions": out_dir / "test_predictions.csv",
         "confusion_matrix": out_dir / "confusion_matrix.png",
         "confusion_matrix_normalized": out_dir / "confusion_matrix_normalized.png",
+        "reliability_before": out_dir / "reliability_diagram_test_before.png",
+        "reliability_after": out_dir / "reliability_diagram_test_after.png",
     }
     files["metrics"].write_bytes((json.dumps(report, indent=2) + "\n").encode())
-    write_predictions(files["predictions"], paths, y_true, probs, classes)
+    write_predictions(files["predictions"], paths, y_true, probs, calibrated, classes)
+    cal = report["calibration"]
+    for when in ("before", "after"):
+        label = "raw softmax" if when == "before" else f"T = {cal['temperature']:.3f}"
+        plot_reliability(
+            cal[f"reliability_{when}"],
+            cal[when]["ece"]["value"],
+            files[f"reliability_{when}"],
+            f"{report['model']} on {PROTECTED_SPLIT}, {label}",
+        )
     cm = np.array(report["confusion_matrix"]["counts"], dtype=np.int64)
     n = report["n_images"]
     title = f"{report['model']} on {PROTECTED_SPLIT} (n={n})"
@@ -286,6 +412,11 @@ def mlflow_payload(report: Mapping[str, Any]) -> tuple[dict[str, float], dict[st
     for cls, m in report["per_class"].items():
         for name in ("precision", "recall", "f1"):
             metrics[f"test_{name}.{cls}"] = m[name]["value"]
+    cal = report["calibration"]
+    metrics["test_temperature_applied"] = cal["temperature"]
+    for score in ("ece", "nll", "brier"):
+        for when in ("before", "after", "change"):
+            metrics[f"test_{score}_{when}"] = cal[when][score]["value"]
     prov, boot = report["provenance"], report["bootstrap"]
     tags = {
         "test_eval_split_file": report["split_file"],
@@ -311,6 +442,8 @@ def log_to_mlflow(params: Mapping[str, Any], spec: ModelSpec, files: Mapping[str
         files=[
             (files["confusion_matrix"], PLOT_DIR),
             (files["confusion_matrix_normalized"], PLOT_DIR),
+            (files["reliability_before"], PLOT_DIR),
+            (files["reliability_after"], PLOT_DIR),
             (files["metrics"], "eval"),
         ],
     )
@@ -323,6 +456,7 @@ def run(params: Mapping[str, Any], *, log_mlflow: bool = False) -> list[dict[str
     """Check, then evaluate each model (main first). Returns one summary per model."""
     check_split(params)
     specs = check_model_choice(params)
+    temperatures = [load_temperature(params, spec) for spec in specs]
     cfg = EvalConfig.from_params(params)
     split_csv, raw_dir = Path(params["data"]["split_file"]), Path(params["data"]["raw_dir"])
     pre_cfg = PreprocessConfig.from_params(params)
@@ -330,14 +464,15 @@ def run(params: Mapping[str, Any], *, log_mlflow: bool = False) -> list[dict[str
 
     summaries: list[dict[str, Any]] = []
     samples, units, groups, ref_labels, classes = None, None, None, None, None
-    for spec, role in zip(specs, ROLES, strict=True):
+    for spec, role, (temperature, cal_path) in zip(specs, ROLES, temperatures, strict=True):
         model, model_classes, timm_name = load_checkpoint(spec.checkpoint)
         if classes is not None and model_classes != classes:
             raise EvalError("the models use different class orders")
         classes = model_classes
         # The only place outside the promotion gate that reads test_frozen (ADR-022 settled).
         ds = SplitDataset(split_csv, raw_dir, [PROTECTED_SPLIT], classes, pre_cfg, allow_test=True)
-        y_true, probs = predict_proba(model, DataLoader(ds, batch_size=cfg.batch_size))
+        y_true, logits, probs = predict_outputs(model, DataLoader(ds, batch_size=cfg.batch_size))
+        calibrated = softmax(logits, temperature)
         if samples is None:
             groups = near_copy_groups_within(ds.paths, cfg)
             units = unit_ids(ds.paths, groups)
@@ -373,6 +508,12 @@ def run(params: Mapping[str, Any], *, log_mlflow: bool = False) -> list[dict[str
                     "the bootstrap cannot show uncertainty it never sees."
                 ),
             },
+            "calibration": {
+                "temperature": temperature,
+                "source": cal_path.relative_to(REPO_ROOT).as_posix(),
+                "applied_only": "T was fitted on val (calibrate.py); nothing is fitted on test",
+                **calibration_report(y_true, probs, calibrated, samples, cfg.n_bins, cfg.level),
+            },
             "provenance": {
                 "git_commit": commit["sha"],
                 "git_dirty": commit["dirty"],
@@ -384,7 +525,9 @@ def run(params: Mapping[str, Any], *, log_mlflow: bool = False) -> list[dict[str
                 "timm": timm.__version__,
             },
         }
-        files = write_outputs(cfg.out_dir / spec.name, report, ds.paths, y_true, probs, classes)
+        files = write_outputs(
+            cfg.out_dir / spec.name, report, ds.paths, y_true, probs, calibrated, classes
+        )
         summary = {"model": spec.name, "role": role, "out_dir": (cfg.out_dir / spec.name)}
         if log_mlflow:
             summary["mlflow_run"] = log_to_mlflow(params, spec, files)
@@ -417,6 +560,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{s['model']} ({s['role']}): accuracy {_fmt(r['accuracy'])}, "
             f"macro-F1 {_fmt(r['macro_f1'])}, errors {r['n_errors']}/{r['n_images']}"
         )
+        cal = r["calibration"]
+        print(f"  calibration (T = {cal['temperature']:.4f} from val, applied only):")
+        for score in ("ece", "nll", "brier"):
+            print(
+                f"    {score}: before {_fmt(cal['before'][score])} -> after "
+                f"{_fmt(cal['after'][score])}; {cal['verdict'][score]}"
+            )
         print(f"  wrote {s['out_dir'].as_posix()}/")
         if "mlflow_run" in s:
             print(f"  MLflow: {s['mlflow_run']}")

@@ -61,6 +61,19 @@ compare_val:                       # src/training/compare_val.py: model choice o
       results_dir: results/compare/mobilenetv3_small_100
   out: results/compare/val_mcnemar.json
 
+calibrate:                         # src/training/calibrate.py: temperature scaling on val only (ADR-006)
+  t_min: 0.25                      # declared range for T; a fit on a bound stops the run (nothing written)
+  t_max: 4.0
+  grid_size: 81                    # log-spaced grid over [t_min, t_max], then golden-section refinement (NLL is convex in 1/T)
+  n_bins: 15                       # equal-width confidence bins for ECE and reliability diagrams (val and test)
+  cv_folds: 5                      # cross-fitted val estimate; near-copy groups stay in one fold
+  seed: 13                         # folds + val bootstrap
+  batch_size: 32                   # CPU inference only
+  bootstrap:                       # cluster bootstrap stratified by class (as evaluate)
+    n_resamples: 10000
+    t_resamples: 2000              # resamples on which T is refitted for its interval
+    level: 0.95
+
 evaluate:                          # src/training/evaluate.py on test_frozen (TASK-011); reports only, never selects
   # Models: compare_val.models (same order; main model first). Groups: near_duplicates_cnn.pairs_file at confirm_pixel_corr.
   batch_size: 32                   # CPU inference only

@@ -27,6 +27,8 @@ ALLOWED_PLOT_NAMES = frozenset(
         "reliability_diagram",
         "reliability_diagram_before",
         "reliability_diagram_after",
+        "reliability_diagram_test_before",  # test_frozen, T applied only (TASK-012)
+        "reliability_diagram_test_after",
         "risk_coverage",
         "per_class_f1",
         "training_curves",

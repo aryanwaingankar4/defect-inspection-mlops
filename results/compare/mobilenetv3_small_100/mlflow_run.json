@@ -1,0 +1,8 @@
+{
+  "experiment": "neu-training",
+  "role": "comparison",
+  "run_id": "611be1f795044240b5d06ea1345c3cdd",
+  "run_url": "https://dagshub.com/aryanwaingankar4/defect-inspection-mlops.mlflow/#/experiments/1/runs/611be1f795044240b5d06ea1345c3cdd",
+  "registered_version": null,
+  "registered_model": null
+}

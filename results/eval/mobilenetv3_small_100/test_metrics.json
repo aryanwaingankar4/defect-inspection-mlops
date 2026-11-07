@@ -201,8 +201,180 @@
     "level": 0.95,
     "note": "A metric with no errors in the test set has the interval [1, 1]: the bootstrap cannot show uncertainty it never sees."
   },
+  "calibration": {
+    "temperature": 1.171156663870186,
+    "source": "results/compare/mobilenetv3_small_100/calibration.json",
+    "applied_only": "T was fitted on val (calibrate.py); nothing is fitted on test",
+    "n_images": 360,
+    "n_errors": 5,
+    "before": {
+      "ece": {
+        "value": 0.015790435837374724,
+        "ci_low": 0.005864657834022774,
+        "ci_high": 0.027924018702268426
+      },
+      "nll": {
+        "value": 0.08464030921459198,
+        "ci_low": 0.014780566049739723,
+        "ci_high": 0.17973172999918452
+      },
+      "brier": {
+        "value": 0.025000862687470298,
+        "ci_low": 0.006792444890200769,
+        "ci_high": 0.04759393615734534
+      }
+    },
+    "after": {
+      "ece": {
+        "value": 0.01641401076223157,
+        "ci_low": 0.0065004735681738895,
+        "ci_high": 0.02858236171011165
+      },
+      "nll": {
+        "value": 0.07472509860895007,
+        "ci_low": 0.014690426492060798,
+        "ci_high": 0.15600733110691994
+      },
+      "brier": {
+        "value": 0.025170308649700334,
+        "ci_low": 0.007188768729761175,
+        "ci_high": 0.04746164272681656
+      }
+    },
+    "change": {
+      "ece": {
+        "value": 0.0006235749248568456,
+        "ci_low": -0.00020004248228019283,
+        "ci_high": 0.0016320195882134024
+      },
+      "nll": {
+        "value": -0.009915210605641905,
+        "ci_low": -0.023745681541612385,
+        "ci_high": 0.0002441681749488948
+      },
+      "brier": {
+        "value": 0.00016944596223003594,
+        "ci_low": -0.0005868471197970691,
+        "ci_high": 0.0008421764176757439
+      }
+    },
+    "verdict": {
+      "ece": "no clear change: the interval of the change includes 0",
+      "nll": "no clear change: the interval of the change includes 0",
+      "brier": "no clear change: the interval of the change includes 0"
+    },
+    "reliability_before": {
+      "n_bins": 15,
+      "count": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        2,
+        1,
+        1,
+        353
+      ],
+      "confidence": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        0.5458952188491821,
+        0.6644821166992188,
+        0.6706039905548096,
+        0.760634183883667,
+        0.8628684878349304,
+        0.9206173419952393,
+        0.9993725268766495
+      ],
+      "accuracy": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        0.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.9886685552407932
+      ]
+    },
+    "reliability_after": {
+      "n_bins": 15,
+      "count": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        2,
+        1,
+        1,
+        1,
+        2,
+        352
+      ],
+      "confidence": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        0.5392176567360061,
+        0.6288114813403376,
+        0.682986907663867,
+        0.7355464976697232,
+        0.8278357257755813,
+        0.904709185435892,
+        0.9991001042111619
+      ],
+      "accuracy": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        0.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.9886363636363636
+      ]
+    },
+    "caution": "Only 5 of 360 images are misclassified, so NLL and ECE rest mostly on those few images; treat small changes as uncertain."
+  },
   "provenance": {
-    "git_commit": "cd6147cb4084fbb2e1f1080c24fe4fde1f5b840e",
+    "git_commit": "202b0b5a6ebf132b4bfaef7a06e8a2b77b587415",
     "git_dirty": false,
     "checkpoint_sha256": "334ff9581d0c12990740aabe6cbdb11f993f146d18b0e84c348f2e2af321834b",
     "train_run_uid": "ce5dad6d2fdd432ba7f8654940bb7f65",

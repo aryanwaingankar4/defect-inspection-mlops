@@ -20,6 +20,7 @@ from src.training.metrics import (  # noqa: E402
     grouped_bootstrap_indices,
     per_class_precision_recall_f1,
     percentile_interval,
+    softmax,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -118,7 +119,7 @@ def test_near_copy_groups_use_confirmed_edges_inside_the_set(tmp_path):
         ],
         pairs,
     )
-    cfg = ev.EvalConfig(32, 10, 0, 0.95, tmp_path, pairs, 0.3)
+    cfg = ev.EvalConfig(32, 10, 0, 0.95, tmp_path, pairs, 0.3, 15)
     assert ev.near_copy_groups_within(["t1", "t2", "t3", "t4"], cfg) == [["t1", "t2"]]
 
 
@@ -141,6 +142,17 @@ def fake_setup(root: Path, *, significant=False, order=("m1", "m2")) -> dict:
         ckpt.write_bytes(name.encode())
         res.mkdir()
         (res / "val_metrics.json").write_text(json.dumps({"checkpoint_sha256": _sha(ckpt)}))
+        cal = {
+            "temperature": 1.5,
+            "at_bound": False,
+            "checkpoint_sha256": _sha(ckpt),
+            "fitted_on": {
+                "split": "val",
+                "split_file": "split.csv",
+                "split_sha256": _sha(root / "split.csv"),
+            },
+        }
+        (res / "calibration.json").write_text(json.dumps(cal), encoding="utf-8")
         models.append({"name": name, "checkpoint": f"{name}.pt", "results_dir": f"res_{name}"})
     for name in order:
         report_models.append({"name": name, "checkpoint_sha256": _sha(root / f"{name}.pt")})
@@ -217,12 +229,64 @@ def test_run_checks_before_reading_test_frozen(monkeypatch):
         ev.run(PARAMS)
 
 
+def _spec(root: Path, name: str = "m1") -> ModelSpec:
+    return ModelSpec(name, Path(f"{name}.pt"), Path(f"res_{name}"))
+
+
+def test_load_temperature_accepts_a_matching_calibration(tmp_path):
+    params = fake_setup(tmp_path)
+    t, path = ev.load_temperature(params, _spec(tmp_path), tmp_path)
+    assert t == 1.5 and path.name == ev.CALIBRATION_FILE
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"checkpoint_sha256": "0" * 64}, "another checkpoint"),
+        ({"at_bound": True}, "range bound"),
+        ({"fitted_on": {"split": "test_frozen", "split_file": "split.csv"}}, "not fitted on val"),
+        (
+            {"fitted_on": {"split": "val", "split_file": "split.csv", "split_sha256": "x"}},
+            "changed",
+        ),
+    ],
+)
+def test_load_temperature_refuses_a_mismatched_calibration(tmp_path, change, message):
+    params = fake_setup(tmp_path)
+    path = tmp_path / "res_m1" / ev.CALIBRATION_FILE
+    cal = {**json.loads(path.read_text(encoding="utf-8")), **change}
+    path.write_text(json.dumps(cal), encoding="utf-8")
+    with pytest.raises(ev.EvalError, match=message):
+        ev.load_temperature(params, _spec(tmp_path), tmp_path)
+
+
+def test_load_temperature_refuses_without_calibration(tmp_path):
+    params = fake_setup(tmp_path)
+    (tmp_path / "res_m1" / ev.CALIBRATION_FILE).unlink()
+    with pytest.raises(ev.EvalError, match="make calibrate"):
+        ev.load_temperature(params, _spec(tmp_path), tmp_path)
+
+
+def test_calibration_report_keeps_classes_and_counts_errors():
+    y = np.array([0, 1, 2, 0])
+    logits = np.eye(3)[[0, 1, 1, 0]] * 4.0  # one error
+    before, after = softmax(logits), softmax(logits, 2.0)
+    samples = grouped_bootstrap_indices(y, np.arange(4), 20, seed=0)
+    r = ev.calibration_report(y, before, after, samples, 10, 0.95)
+    assert r["n_errors"] == 1 and "Only 1 of 4" in r["caution"]
+    assert set(r["verdict"]) == {"ece", "nll", "brier"}
+    assert sum(r["reliability_after"]["count"]) == 4
+
+
 def test_committed_state_passes_the_checks_and_main_model_is_first():
     ev.check_split(PARAMS)
     cfg = PARAMS["compare_val"]
     assert cfg["models"][0]["name"] == PARAMS["train"]["model"]
     report = json.loads((REPO_ROOT / cfg["out"]).read_text(encoding="utf-8"))
     assert report["significant"] is False
+    for spec in ev.specs_from_params(cfg):
+        if (REPO_ROOT / spec.checkpoint).exists():
+            ev.load_temperature(PARAMS, spec)
 
 
 # ---------------------------------------------------------------- outputs + MLflow
@@ -233,6 +297,10 @@ def fake_report(name="m1") -> tuple[dict, np.ndarray, np.ndarray]:
     probs = np.eye(3)[y] * 0.9 + 0.05
     probs[0] = [0.1, 0.8, 0.1]  # one error
     samples = grouped_bootstrap_indices(y, np.arange(len(y)), 50, seed=0)
+    calibration = {
+        "temperature": 1.0,
+        **ev.calibration_report(y, probs, probs, samples, 10, 0.95),
+    }
     report = {
         "model": name,
         "role": "main",
@@ -240,6 +308,7 @@ def fake_report(name="m1") -> tuple[dict, np.ndarray, np.ndarray]:
         "n_images": len(y),
         **ev.metrics_report(y, probs.argmax(axis=1), CLASSES, samples, 0.95),
         "bootstrap": {"method": "cluster", "n_resamples": 50},
+        "calibration": calibration,
         "provenance": {"git_commit": "abc"},
     }
     return report, y, probs
@@ -248,13 +317,15 @@ def fake_report(name="m1") -> tuple[dict, np.ndarray, np.ndarray]:
 def test_write_outputs_and_plot_names_are_allowlisted(tmp_path):
     report, y, probs = fake_report()
     paths = [f"img_{i}.jpg" for i in range(len(y))]
-    files = ev.write_outputs(tmp_path, report, paths, y, probs, CLASSES)
+    files = ev.write_outputs(tmp_path, report, paths, y, probs, probs * 0 + 0.5, CLASSES)
     assert all(p.is_file() for p in files.values())
-    assert is_allowed_artifact(f"{ev.PLOT_DIR}/{files['confusion_matrix'].name}")
-    assert is_allowed_artifact(f"{ev.PLOT_DIR}/{files['confusion_matrix_normalized'].name}")
+    for key in ("confusion_matrix", "confusion_matrix_normalized"):
+        assert is_allowed_artifact(f"{ev.PLOT_DIR}/{files[key].name}")
+    for key in ("reliability_before", "reliability_after"):
+        assert is_allowed_artifact(f"{ev.PLOT_DIR}/{files[key].name}")
     lines = files["predictions"].read_text(encoding="utf-8").splitlines()
-    assert lines[0] == "path,true,pred,confidence,correct"
-    assert lines[1] == "img_0.jpg,a,b,0.8000,0"
+    assert lines[0] == "path,true,pred,confidence,calibrated_confidence,correct"
+    assert lines[1] == "img_0.jpg,a,b,0.8000,0.5000,0"
     assert b"\r\n" not in files["metrics"].read_bytes()
 
 
@@ -264,6 +335,7 @@ def test_mlflow_payload_names():
     assert {"test_accuracy", "test_macro_f1_ci_low", "test_recall.a", "test_f1.c"} <= set(metrics)
     assert all(isinstance(v, float) for v in metrics.values())
     assert tags["test_eval_role"] == "main"
+    assert {"test_temperature_applied", "test_ece_before", "test_nll_after"} <= set(metrics)
 
 
 def test_log_to_mlflow_adds_to_the_finished_run_locally(tmp_path):
@@ -282,7 +354,9 @@ def test_log_to_mlflow_adds_to_the_finished_run_locally(tmp_path):
     res.mkdir()
     (res / "mlflow_run.json").write_text(json.dumps({"run_id": run_id}), encoding="utf-8")
     report, y, probs = fake_report()
-    files = ev.write_outputs(tmp_path / "out", report, [str(i) for i in y], y, probs, CLASSES)
+    files = ev.write_outputs(
+        tmp_path / "out", report, [str(i) for i in y], y, probs, probs, CLASSES
+    )
     link = ev.log_to_mlflow(PARAMS, ModelSpec("m1", tmp_path / "x.pt", res), files)
 
     run = MlflowClient().get_run(run_id)
@@ -291,7 +365,12 @@ def test_log_to_mlflow_adds_to_the_finished_run_locally(tmp_path):
     assert run.data.metrics["test_accuracy"] == pytest.approx(report["accuracy"]["value"])
     assert run.data.tags["test_eval_decision_record"] == "ADR-022"
     plots = {a.path for a in MlflowClient().list_artifacts(run_id, ev.PLOT_DIR)}
-    assert plots == {"plots/confusion_matrix.png", "plots/confusion_matrix_normalized.png"}
+    assert plots == {
+        "plots/confusion_matrix.png",
+        "plots/confusion_matrix_normalized.png",
+        "plots/reliability_diagram_test_before.png",
+        "plots/reliability_diagram_test_after.png",
+    }
     assert [a.path for a in MlflowClient().list_artifacts(run_id, "eval")] == [
         "eval/test_metrics.json"
     ]
@@ -328,6 +407,17 @@ def test_committed_results_are_consistent(index):
         (REPO_ROOT / spec["results_dir"] / "val_metrics.json").read_text(encoding="utf-8")
     )
     assert r["provenance"]["checkpoint_sha256"] == recorded["checkpoint_sha256"]
+    cal = json.loads(
+        (REPO_ROOT / spec["results_dir"] / "calibration.json").read_text(encoding="utf-8")
+    )
+    c = r["calibration"]
+    assert c["temperature"] == cal["temperature"]
+    assert c["source"] == f"{spec['results_dir']}/calibration.json"
+    assert c["n_errors"] == r["n_errors"]
+    assert c["reliability_before"]["n_bins"] == PARAMS["calibrate"]["n_bins"]
+    rows = REPO_ROOT / PARAMS["evaluate"]["out_dir"] / spec["name"] / "test_predictions.csv"
+    lines = rows.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "path,true,pred,confidence,calibrated_confidence,correct"
 
 
 @pytest.mark.needs_data
@@ -341,7 +431,8 @@ def test_run_reproduces_committed_results(tmp_path, monkeypatch):
     params["evaluate"]["out_dir"] = str(tmp_path)
     for s in ev.run(params):
         new, old = s["report"], _committed(s["model"])
-        for key in ("accuracy", "macro_f1", "per_class", "confusion_matrix", "bootstrap"):
+        keys = ("accuracy", "macro_f1", "per_class", "confusion_matrix", "bootstrap", "calibration")
+        for key in keys:
             assert new[key] == old[key], key
         name = "test_predictions.csv"
         committed_csv = REPO_ROOT / PARAMS["evaluate"]["out_dir"] / s["model"] / name

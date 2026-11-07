@@ -61,6 +61,15 @@ compare_val:                       # src/training/compare_val.py: model choice o
       results_dir: results/compare/mobilenetv3_small_100
   out: results/compare/val_mcnemar.json
 
+evaluate:                          # src/training/evaluate.py on test_frozen (TASK-011); reports only, never selects
+  # Models: compare_val.models (same order; main model first). Groups: near_duplicates_cnn.pairs_file at confirm_pixel_corr.
+  batch_size: 32                   # CPU inference only
+  bootstrap:                       # cluster bootstrap stratified by class (near-copy groups resampled together)
+    n_resamples: 10000
+    seed: 11                       # bootstrap only; same resamples for every model
+    level: 0.95                    # two-sided percentile interval
+  out_dir: results/eval            # results/eval/<model>/: test_metrics.json, test_predictions.csv, 2 plots
+
 tracking:                          # MLflow (ADR-018), used on the laptop only (ADR-020). Server from env MLFLOW_TRACKING_URI, else local_uri
   experiment: neu-training
   registered_model: steel-defect-classifier

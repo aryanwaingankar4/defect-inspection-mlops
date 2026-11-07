@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -263,3 +264,35 @@ def check_model_files(model: Any, save_kwargs: Mapping[str, Any]) -> None:
     bad = find_violations(files)
     if bad:
         raise ArtifactPolicyError(f"Refusing to log model: files break the policy: {bad}")
+
+
+def add_to_finished_run(
+    cfg: TrackingConfig,
+    run_id: str,
+    *,
+    metrics: Mapping[str, float],
+    tags: Mapping[str, Any],
+    files: Sequence[tuple[Path, str | None]],
+) -> str:
+    """Add metrics, tags and files to an existing run without reopening it (its status and
+    times stay as they are). Files go through the artifact policy. Returns the run's link."""
+    tracking_uri = resolve_tracking_uri(cfg.local_uri)
+    client = mlflow.MlflowClient(tracking_uri=tracking_uri)
+    run = client.get_run(run_id)
+    for path, artifact_dir in files:  # policy-check every file before anything is sent
+        safe_log_artifact(path, artifact_dir, lambda *_: None)
+    client.log_batch(
+        run_id,
+        metrics=[mlflow.entities.Metric(k, float(v), _now_ms(), 0) for k, v in metrics.items()],
+        tags=[mlflow.entities.RunTag(k, str(v)) for k, v in tags.items()],
+    )
+    for path, artifact_dir in files:
+        safe_log_artifact(path, artifact_dir, lambda p, d: client.log_artifact(run_id, p, d))
+    base = redact_uri(tracking_uri).rstrip("/")
+    if is_remote(tracking_uri):
+        return f"{base}/#/experiments/{run.info.experiment_id}/runs/{run_id}"
+    return f"{base} (run {run_id})"
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)

@@ -16,7 +16,7 @@ RAW_DIR := data/raw
 PARAMS := configs/params.yaml
 
 .PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
-	compare-val register kaggle-dataset kaggle-push kaggle-status kaggle-output
+	compare-val evaluate register kaggle-dataset kaggle-push kaggle-status kaggle-output
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -79,6 +79,9 @@ train-smoke: ## Tiny end-to-end check on real data (CPU OK): train, then publish
 
 compare-val: ## Paired McNemar test of the two v2 models on val (CPU inference; ADR-022)
 	$(RUN_TRAIN) python -m src.training.compare_val --config $(PARAMS) $(ARGS)
+
+evaluate: ## Both models on test_frozen -> results/eval/ (CPU; after compare-val, ADR-022). ARGS: --log-mlflow
+	$(RUN_TRAIN) $(ENV_FILE) python -m src.training.evaluate --config $(PARAMS) $(ARGS)
 
 register: ## Publish the downloaded Kaggle run to MLflow. ARGS: --register, --role comparison, --results-dir DIR (ADR-020)
 	$(RUN_TRAIN) $(ENV_FILE) python -m src.tracking.publish --config $(PARAMS) $(ARGS)

@@ -164,3 +164,16 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
   - v1 metrics (archived) are not comparable 1:1 with v2 metrics: both `train_v1` and `val` changed, not only the leakage.
   - `make near-copies` takes about 20 minutes on the laptop CPU (forward passes + FFT pixel checks); it only reruns when the data or its parameters change.
 - **Implemented (TASK-008b):** commit `9c9845f` (check, split v2, gate). Retrained on v2 on Kaggle: baseline efficientnet_b0 at `9c9845f`, registered as `steel-defect-classifier` version 2, results in `results/train/`; MobileNetV3-small comparison at `695b306` (not registered), results in `results/compare/mobilenetv3_small_100/`. Both report the same data fingerprint. Version 1 and the v1 comparison run are tagged `split_file=neu_split_v1.csv`, `leaky_split=true` in MLflow; their results are in `results/archive/split_v1/`.
+
+## ADR-022 — Main model choice is fixed on `val` before `test_frozen` is read
+- **Context:** On split v2, MobileNetV3-small has a higher val macro-F1 than the baseline efficientnet_b0 (`results/compare/mobilenetv3_small_100/val_metrics.json` vs `results/train/val_metrics.json`). The gap is a few of the 180 val images. efficientnet_b0 is the pre-declared main model (`train.model`); MobileNetV3-small was trained only as a comparison (TASK-010).
+- **Decision (written and committed before the test below was run, and before any model reads `test_frozen`):**
+  - **Test:** exact two-sided McNemar test on `val` of split v2: both best checkpoints predict the same 180 images (CPU inference only); the p-value is the exact binomial test on the discordant images (one model right, the other wrong). Significance level `compare_val.alpha` (0.05) in `params.yaml`. Output: `results/compare/val_mcnemar.json`.
+  - **If p >= 0.05:** efficientnet_b0 stays the main model (`steel-defect-classifier`, the candidate for `@champion` in TASK-014). MobileNetV3-small is reported as the lighter alternative, with its own results, and is not registered.
+  - **If p < 0.05:** no automatic switch. Work stops and the project owner decides.
+  - **Sanity check first:** the CPU predictions must reproduce each model's recorded val macro-F1 and accuracy; if not, stop before testing.
+  - **`test_frozen` never changes this choice.** TASK-011 evaluates both models on `test_frozen` and reports the numbers, but the main model stays the one chosen here.
+- **Reason:** Choosing between models on `test_frozen` would turn the test set into a selection set and make its numbers optimistic. Fixing the rule before seeing the result stops us from picking whichever rule favours the result.
+- **Consequences / risks:**
+  - `val` was also used for early stopping of both models, so both val scores are slightly optimistic; the paired test still compares them on equal terms.
+  - With 180 images and few discordant pairs, the test has low power: "not significant" means "no evidence of a difference", not "the models are equal".

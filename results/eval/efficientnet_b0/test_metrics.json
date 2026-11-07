@@ -1,0 +1,214 @@
+{
+  "model": "efficientnet_b0",
+  "role": "main",
+  "decision_record": "ADR-022",
+  "timm_model": "efficientnet_b0",
+  "split": "test_frozen",
+  "split_file": "neu_split_v2.csv",
+  "split_sha256": "f38cdd74a1437d512db8012edfd28f534687e17fe01dac1e21d56c747b3062ec",
+  "n_images": 360,
+  "classes": [
+    "crazing",
+    "inclusion",
+    "patches",
+    "pitted_surface",
+    "rolled-in_scale",
+    "scratches"
+  ],
+  "accuracy": {
+    "value": 0.9916666666666667,
+    "ci_low": 0.9806629834254144,
+    "ci_high": 1.0
+  },
+  "macro_f1": {
+    "value": 0.9917095403684417,
+    "ci_low": 0.9807881442642843,
+    "ci_high": 1.0
+  },
+  "n_errors": 3,
+  "per_class": {
+    "crazing": {
+      "support": 60,
+      "precision": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "f1": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      }
+    },
+    "inclusion": {
+      "support": 60,
+      "precision": {
+        "value": 0.9523809523809523,
+        "ci_low": 0.896551724137931,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "f1": {
+        "value": 0.975609756097561,
+        "ci_low": 0.9454545454545454,
+        "ci_high": 1.0
+      }
+    },
+    "patches": {
+      "support": 60,
+      "precision": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "f1": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      }
+    },
+    "pitted_surface": {
+      "support": 60,
+      "precision": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "value": 0.9666666666666667,
+        "ci_low": 0.9137931034482759,
+        "ci_high": 1.0
+      },
+      "f1": {
+        "value": 0.9830508474576272,
+        "ci_low": 0.954954954954955,
+        "ci_high": 1.0
+      }
+    },
+    "rolled-in_scale": {
+      "support": 60,
+      "precision": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "f1": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      }
+    },
+    "scratches": {
+      "support": 60,
+      "precision": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "value": 0.9833333333333333,
+        "ci_low": 0.9464285714285714,
+        "ci_high": 1.0
+      },
+      "f1": {
+        "value": 0.9915966386554622,
+        "ci_low": 0.9724770642201835,
+        "ci_high": 1.0
+      }
+    }
+  },
+  "confusion_matrix": {
+    "rows": "true class",
+    "columns": "predicted",
+    "counts": [
+      [
+        60,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        60,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        60,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        2,
+        0,
+        58,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        60,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0,
+        0,
+        59
+      ]
+    ]
+  },
+  "bootstrap": {
+    "method": "cluster bootstrap stratified by class, percentile interval",
+    "unit": "confirmed near-copy group (ADR-021) or single image",
+    "n_units": 319,
+    "n_groups": 33,
+    "images_in_groups": 74,
+    "n_resamples": 10000,
+    "seed": 11,
+    "level": 0.95,
+    "note": "A metric with no errors in the test set has the interval [1, 1]: the bootstrap cannot show uncertainty it never sees."
+  },
+  "provenance": {
+    "git_commit": "cd6147cb4084fbb2e1f1080c24fe4fde1f5b840e",
+    "git_dirty": false,
+    "checkpoint_sha256": "108b03706b708404d7a013fa36a21ea51cced4c2f9321f097cc2c5147a8de1dd",
+    "train_run_uid": "85cc41e56aa54bd280f616fe8a87a441",
+    "results_dir": "results/train",
+    "device": "cpu",
+    "torch": "2.15.0+cpu",
+    "timm": "1.0.31"
+  }
+}

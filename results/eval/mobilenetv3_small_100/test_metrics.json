@@ -1,0 +1,214 @@
+{
+  "model": "mobilenetv3_small_100",
+  "role": "lighter alternative",
+  "decision_record": "ADR-022",
+  "timm_model": "mobilenetv3_small_100.lamb_in1k",
+  "split": "test_frozen",
+  "split_file": "neu_split_v2.csv",
+  "split_sha256": "f38cdd74a1437d512db8012edfd28f534687e17fe01dac1e21d56c747b3062ec",
+  "n_images": 360,
+  "classes": [
+    "crazing",
+    "inclusion",
+    "patches",
+    "pitted_surface",
+    "rolled-in_scale",
+    "scratches"
+  ],
+  "accuracy": {
+    "value": 0.9861111111111112,
+    "ci_low": 0.972972972972973,
+    "ci_high": 0.9972067039106145
+  },
+  "macro_f1": {
+    "value": 0.9861072994720832,
+    "ci_low": 0.9730052391207485,
+    "ci_high": 0.9971917404129793
+  },
+  "n_errors": 5,
+  "per_class": {
+    "crazing": {
+      "support": 60,
+      "precision": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "f1": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      }
+    },
+    "inclusion": {
+      "support": 60,
+      "precision": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "value": 0.9666666666666667,
+        "ci_low": 0.9122807017543859,
+        "ci_high": 1.0
+      },
+      "f1": {
+        "value": 0.9830508474576272,
+        "ci_low": 0.9541284403669725,
+        "ci_high": 1.0
+      }
+    },
+    "patches": {
+      "support": 60,
+      "precision": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "f1": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      }
+    },
+    "pitted_surface": {
+      "support": 60,
+      "precision": {
+        "value": 0.9661016949152542,
+        "ci_low": 0.9180327868852459,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "value": 0.95,
+        "ci_low": 0.8870967741935484,
+        "ci_high": 1.0
+      },
+      "f1": {
+        "value": 0.957983193277311,
+        "ci_low": 0.9174311926605505,
+        "ci_high": 0.9915966386554622
+      }
+    },
+    "rolled-in_scale": {
+      "support": 60,
+      "precision": {
+        "value": 0.9523809523809523,
+        "ci_low": 0.8970588235294118,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "f1": {
+        "value": 0.975609756097561,
+        "ci_low": 0.9457364341085271,
+        "ci_high": 1.0
+      }
+    },
+    "scratches": {
+      "support": 60,
+      "precision": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "f1": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      }
+    }
+  },
+  "confusion_matrix": {
+    "rows": "true class",
+    "columns": "predicted",
+    "counts": [
+      [
+        60,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        58,
+        0,
+        2,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        60,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        57,
+        3,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        60,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        60
+      ]
+    ]
+  },
+  "bootstrap": {
+    "method": "cluster bootstrap stratified by class, percentile interval",
+    "unit": "confirmed near-copy group (ADR-021) or single image",
+    "n_units": 319,
+    "n_groups": 33,
+    "images_in_groups": 74,
+    "n_resamples": 10000,
+    "seed": 11,
+    "level": 0.95,
+    "note": "A metric with no errors in the test set has the interval [1, 1]: the bootstrap cannot show uncertainty it never sees."
+  },
+  "provenance": {
+    "git_commit": "cd6147cb4084fbb2e1f1080c24fe4fde1f5b840e",
+    "git_dirty": false,
+    "checkpoint_sha256": "334ff9581d0c12990740aabe6cbdb11f993f146d18b0e84c348f2e2af321834b",
+    "train_run_uid": "ce5dad6d2fdd432ba7f8654940bb7f65",
+    "results_dir": "results/compare/mobilenetv3_small_100",
+    "device": "cpu",
+    "torch": "2.15.0+cpu",
+    "timm": "1.0.31"
+  }
+}

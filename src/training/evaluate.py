@@ -308,7 +308,7 @@ def plot_reliability(bins: Mapping[str, Any], ece_value: float, path: Path, titl
     )
     used = count > 0
     ax.bar(centers[used], acc[used], width=width, edgecolor="black", label="accuracy in bin")
-    ax.plot(conf[used], acc[used], "o", color="tab:orange", label="mean confidence in bin")
+    ax.plot(centers[used], conf[used], "o", color="tab:orange", label="mean confidence in bin")
     ax.plot([0, 1], [0, 1], "--", color="gray", label="perfect calibration")
     ax.set(ylabel="accuracy", ylim=(0, 1.02), title=f"{title}\nECE = {ece_value:.4f}")
     ax.legend(loc="upper left", fontsize=8)

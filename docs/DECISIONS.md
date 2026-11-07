@@ -177,3 +177,4 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
 - **Consequences / risks:**
   - `val` was also used for early stopping of both models, so both val scores are slightly optimistic; the paired test still compares them on equal terms.
   - With 180 images and few discordant pairs, the test has low power: "not significant" means "no evidence of a difference", not "the models are equal".
+- **Result (`make compare-val`, `src/training/compare_val.py`):** both checkpoints reproduced their recorded val metrics on CPU. Of 180 val images, 5 are discordant: 1 only efficientnet_b0 got right, 4 only MobileNetV3-small got right; exact p = 0.375 (`results/compare/val_mcnemar.json`). Not significant, so efficientnet_b0 stays the main model and MobileNetV3-small is the lighter alternative.

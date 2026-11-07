@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 
@@ -35,3 +37,20 @@ def macro_f1(y_true: np.ndarray, y_pred: np.ndarray, n_classes: int) -> float:
 def accuracy(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     y_true = np.asarray(y_true)
     return float((y_true == np.asarray(y_pred)).mean()) if y_true.size else 0.0
+
+
+def mcnemar_exact(a_only: int, b_only: int) -> float:
+    """Exact two-sided McNemar p-value from the discordant counts.
+
+    ``a_only`` = items only model A got right, ``b_only`` = items only model B got right.
+    Under the null hypothesis each discordant item is a fair coin flip, so the p-value is the
+    two-sided binomial test of ``min(a_only, b_only)`` in ``a_only + b_only`` trials at 0.5.
+    No discordant items gives p = 1.
+    """
+    if a_only < 0 or b_only < 0:
+        raise ValueError("counts must be non-negative")
+    n, k = a_only + b_only, min(a_only, b_only)
+    if n == 0:
+        return 1.0
+    tail = sum(math.comb(n, i) for i in range(k + 1)) / 2**n
+    return min(1.0, 2.0 * tail)

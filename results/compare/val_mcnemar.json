@@ -1,0 +1,76 @@
+{
+  "decision_record": "ADR-022",
+  "split": "val",
+  "split_file": "neu_split_v2.csv",
+  "split_sha256": "f38cdd74a1437d512db8012edfd28f534687e17fe01dac1e21d56c747b3062ec",
+  "n_images": 180,
+  "device": "cpu",
+  "models": [
+    {
+      "name": "efficientnet_b0",
+      "timm_model": "efficientnet_b0",
+      "results_dir": "results/train",
+      "checkpoint_sha256": "108b03706b708404d7a013fa36a21ea51cced4c2f9321f097cc2c5147a8de1dd",
+      "run_uid": "85cc41e56aa54bd280f616fe8a87a441",
+      "accuracy": 0.9777777777777777,
+      "macro_f1": 0.9779568398629248,
+      "n_correct": 176,
+      "reproduces_recorded_val_metrics": true
+    },
+    {
+      "name": "mobilenetv3_small_100",
+      "timm_model": "mobilenetv3_small_100.lamb_in1k",
+      "results_dir": "results/compare/mobilenetv3_small_100",
+      "checkpoint_sha256": "334ff9581d0c12990740aabe6cbdb11f993f146d18b0e84c348f2e2af321834b",
+      "run_uid": "ce5dad6d2fdd432ba7f8654940bb7f65",
+      "accuracy": 0.9944444444444445,
+      "macro_f1": 0.9944429008057795,
+      "n_correct": 179,
+      "reproduces_recorded_val_metrics": true
+    }
+  ],
+  "table": {
+    "both_right": 175,
+    "only_efficientnet_b0_right": 1,
+    "only_mobilenetv3_small_100_right": 4,
+    "both_wrong": 0
+  },
+  "test": "exact two-sided McNemar (binomial test on discordant images, p = 0.5)",
+  "n_discordant": 5,
+  "p_value": 0.375,
+  "alpha": 0.05,
+  "significant": false,
+  "outcome": "not significant (p >= 0.05): efficientnet_b0 stays the main model; mobilenetv3_small_100 is reported as the lighter alternative",
+  "discordant_images": [
+    {
+      "path": "NEU-DET/train/images/inclusion/inclusion_8.jpg",
+      "true": "inclusion",
+      "pred_efficientnet_b0": "inclusion",
+      "pred_mobilenetv3_small_100": "rolled-in_scale"
+    },
+    {
+      "path": "NEU-DET/validation/images/inclusion/inclusion_247.jpg",
+      "true": "inclusion",
+      "pred_efficientnet_b0": "scratches",
+      "pred_mobilenetv3_small_100": "inclusion"
+    },
+    {
+      "path": "NEU-DET/train/images/patches/patches_158.jpg",
+      "true": "patches",
+      "pred_efficientnet_b0": "scratches",
+      "pred_mobilenetv3_small_100": "patches"
+    },
+    {
+      "path": "NEU-DET/train/images/pitted_surface/pitted_surface_235.jpg",
+      "true": "pitted_surface",
+      "pred_efficientnet_b0": "inclusion",
+      "pred_mobilenetv3_small_100": "pitted_surface"
+    },
+    {
+      "path": "NEU-DET/train/images/scratches/scratches_43.jpg",
+      "true": "scratches",
+      "pred_efficientnet_b0": "inclusion",
+      "pred_mobilenetv3_small_100": "scratches"
+    }
+  ]
+}

@@ -47,6 +47,20 @@ train:                             # src/training/train.py; full runs on Kaggle 
     max_epochs: 1
     out_dir: models/smoke          # checkpoint + results of smoke runs; git-ignored
 
+compare_val:                       # src/training/compare_val.py: model choice on val (ADR-022); never test_frozen
+  split: val
+  alpha: 0.05                      # exact two-sided McNemar; p >= alpha keeps the first model as main
+  reproduce_tolerance: 0.000001    # CPU predictions must match the recorded val accuracy / macro-F1
+  batch_size: 32                   # inference only
+  models:                          # first = pre-declared main model (train.model)
+    - name: efficientnet_b0
+      checkpoint: models/baseline/best.pt                        # git-ignored
+      results_dir: results/train
+    - name: mobilenetv3_small_100
+      checkpoint: models/compare/mobilenetv3_small_100/best.pt   # git-ignored
+      results_dir: results/compare/mobilenetv3_small_100
+  out: results/compare/val_mcnemar.json
+
 tracking:                          # MLflow (ADR-018), used on the laptop only (ADR-020). Server from env MLFLOW_TRACKING_URI, else local_uri
   experiment: neu-training
   registered_model: steel-defect-classifier

@@ -1,0 +1,387 @@
+{
+  "note": "Forward passes only (ImageNet-pretrained backbone, not our trained model).",
+  "model": "efficientnet_b0",
+  "embedding_dim": 1280,
+  "images": 1800,
+  "image_list_sha256": "82d2158a3919fa0c9a24851293016cd2af57d7aba5e566e69ae0ef9a52405099",
+  "pairs_compared": 1619100,
+  "calibration": {
+    "cosine_random_same_class": {
+      "pairs": 20000,
+      "p1": 0.2861,
+      "p5": 0.4047,
+      "p50": 0.7477,
+      "p95": 0.9259,
+      "p99": 0.9507,
+      "p99.9": 0.9667,
+      "min": 0.0579,
+      "max": 0.9806
+    },
+    "cosine_shifted_crops": {
+      "images": 180,
+      "crop_px": "image side - 32",
+      "by_shift_px": {
+        "8": {
+          "same_image": {
+            "p1": 0.8647,
+            "p5": 0.9164,
+            "p50": 0.972,
+            "p95": 0.9871,
+            "p99": 0.9886,
+            "p99.9": 0.9896,
+            "min": 0.8413,
+            "max": 0.9898
+          },
+          "different_image": {
+            "p1": 0.3531,
+            "p5": 0.4609,
+            "p50": 0.7598,
+            "p95": 0.9313,
+            "p99": 0.9559,
+            "p99.9": 0.9698,
+            "min": 0.3386,
+            "max": 0.9725
+          }
+        },
+        "16": {
+          "same_image": {
+            "p1": 0.8427,
+            "p5": 0.8827,
+            "p50": 0.9574,
+            "p95": 0.9831,
+            "p99": 0.9899,
+            "p99.9": 0.9909,
+            "min": 0.7524,
+            "max": 0.991
+          },
+          "different_image": {
+            "p1": 0.3478,
+            "p5": 0.4562,
+            "p50": 0.7568,
+            "p95": 0.9283,
+            "p99": 0.9554,
+            "p99.9": 0.9596,
+            "min": 0.3378,
+            "max": 0.9598
+          }
+        },
+        "32": {
+          "same_image": {
+            "p1": 0.7369,
+            "p5": 0.8021,
+            "p50": 0.9332,
+            "p95": 0.973,
+            "p99": 0.9825,
+            "p99.9": 0.9848,
+            "min": 0.7091,
+            "max": 0.9851
+          },
+          "different_image": {
+            "p1": 0.3479,
+            "p5": 0.4494,
+            "p50": 0.7734,
+            "p95": 0.924,
+            "p99": 0.9562,
+            "p99.9": 0.9731,
+            "min": 0.3021,
+            "max": 0.9757
+          }
+        }
+      }
+    },
+    "pixel_corr_random_same_class": {
+      "pairs": 5000,
+      "p1": 0.0264,
+      "p5": 0.0345,
+      "p50": 0.047,
+      "p95": 0.1762,
+      "p99": 0.362,
+      "p99.9": 0.681,
+      "min": 0.0179,
+      "max": 0.97
+    }
+  },
+  "pairs_cosine_ge": {
+    "0.85": 71473,
+    "0.9": 32059,
+    "0.95": 2972,
+    "0.97": 199,
+    "0.98": 19
+  },
+  "rule": {
+    "candidate_cosine_ge": 0.85,
+    "confirm_pixel_corr_ge": 0.3,
+    "highpass_px": 9,
+    "max_shift_px": 48,
+    "kept_in_pairs_file_pixel_corr_ge": 0.1
+  },
+  "candidates": 71473,
+  "candidates_pixel_corr_ge": {
+    "0.2": {
+      "pairs": 458,
+      "same_class": 456,
+      "different_class": 2
+    },
+    "0.3": {
+      "pairs": 353,
+      "same_class": 353,
+      "different_class": 0
+    },
+    "0.5": {
+      "pairs": 246,
+      "same_class": 246,
+      "different_class": 0
+    },
+    "0.7": {
+      "pairs": 173,
+      "same_class": 173,
+      "different_class": 0
+    },
+    "0.9": {
+      "pairs": 113,
+      "same_class": 113,
+      "different_class": 0
+    }
+  },
+  "confirmed_pairs": 353,
+  "confirmed_different_class": [],
+  "groups": {
+    "count": 144,
+    "images": 413,
+    "size_histogram": {
+      "2": 109,
+      "3": 22,
+      "4": 6,
+      "6": 2,
+      "7": 1,
+      "8": 1,
+      "16": 1,
+      "23": 1,
+      "39": 1
+    },
+    "images_by_class": {
+      "crazing": 42,
+      "inclusion": 80,
+      "patches": 14,
+      "pitted_surface": 62,
+      "rolled-in_scale": 35,
+      "scratches": 180
+    },
+    "largest": {
+      "size": 39
+    }
+  },
+  "top_pairs": [
+    {
+      "pixel_corr": 1.0,
+      "cosine": 1.0,
+      "path_a": "NEU-DET/train/images/patches/patches_101.jpg",
+      "class_a": "patches",
+      "path_b": "NEU-DET/train/images/patches/patches_105.jpg",
+      "class_b": "patches"
+    },
+    {
+      "pixel_corr": 1.0,
+      "cosine": 0.9876,
+      "path_a": "NEU-DET/train/images/rolled-in_scale/rolled-in_scale_193.jpg",
+      "class_a": "rolled-in_scale",
+      "path_b": "NEU-DET/train/images/rolled-in_scale/rolled-in_scale_205.jpg",
+      "class_b": "rolled-in_scale"
+    },
+    {
+      "pixel_corr": 1.0,
+      "cosine": 0.9779,
+      "path_a": "NEU-DET/train/images/rolled-in_scale/rolled-in_scale_64.jpg",
+      "class_a": "rolled-in_scale",
+      "path_b": "NEU-DET/train/images/rolled-in_scale/rolled-in_scale_65.jpg",
+      "class_b": "rolled-in_scale"
+    },
+    {
+      "pixel_corr": 1.0,
+      "cosine": 0.9773,
+      "path_a": "NEU-DET/train/images/pitted_surface/pitted_surface_202.jpg",
+      "class_a": "pitted_surface",
+      "path_b": "NEU-DET/train/images/pitted_surface/pitted_surface_204.jpg",
+      "class_b": "pitted_surface"
+    },
+    {
+      "pixel_corr": 1.0,
+      "cosine": 0.9479,
+      "path_a": "NEU-DET/train/images/scratches/scratches_34.jpg",
+      "class_a": "scratches",
+      "path_b": "NEU-DET/train/images/scratches/scratches_35.jpg",
+      "class_b": "scratches"
+    },
+    {
+      "pixel_corr": 1.0,
+      "cosine": 0.8637,
+      "path_a": "NEU-DET/validation/images/scratches/scratches_249.jpg",
+      "class_a": "scratches",
+      "path_b": "NEU-DET/validation/images/scratches/scratches_254.jpg",
+      "class_b": "scratches"
+    },
+    {
+      "pixel_corr": 0.9936,
+      "cosine": 0.8787,
+      "path_a": "NEU-DET/train/images/scratches/scratches_155.jpg",
+      "class_a": "scratches",
+      "path_b": "NEU-DET/train/images/scratches/scratches_164.jpg",
+      "class_b": "scratches"
+    },
+    {
+      "pixel_corr": 0.9928,
+      "cosine": 0.944,
+      "path_a": "NEU-DET/validation/images/scratches/scratches_264.jpg",
+      "class_a": "scratches",
+      "path_b": "NEU-DET/validation/images/scratches/scratches_272.jpg",
+      "class_b": "scratches"
+    },
+    {
+      "pixel_corr": 0.9918,
+      "cosine": 0.8934,
+      "path_a": "NEU-DET/validation/images/scratches/scratches_250.jpg",
+      "class_a": "scratches",
+      "path_b": "NEU-DET/validation/images/scratches/scratches_254.jpg",
+      "class_b": "scratches"
+    },
+    {
+      "pixel_corr": 0.9918,
+      "cosine": 0.8735,
+      "path_a": "NEU-DET/train/images/scratches/scratches_5.jpg",
+      "class_a": "scratches",
+      "path_b": "NEU-DET/train/images/scratches/scratches_6.jpg",
+      "class_b": "scratches"
+    },
+    {
+      "pixel_corr": 0.9911,
+      "cosine": 0.9528,
+      "path_a": "NEU-DET/train/images/pitted_surface/pitted_surface_165.jpg",
+      "class_a": "pitted_surface",
+      "path_b": "NEU-DET/validation/images/pitted_surface/pitted_surface_291.jpg",
+      "class_b": "pitted_surface"
+    },
+    {
+      "pixel_corr": 0.9906,
+      "cosine": 0.962,
+      "path_a": "NEU-DET/train/images/scratches/scratches_188.jpg",
+      "class_a": "scratches",
+      "path_b": "NEU-DET/train/images/scratches/scratches_189.jpg",
+      "class_b": "scratches"
+    },
+    {
+      "pixel_corr": 0.9905,
+      "cosine": 0.9392,
+      "path_a": "NEU-DET/train/images/scratches/scratches_178.jpg",
+      "class_a": "scratches",
+      "path_b": "NEU-DET/train/images/scratches/scratches_185.jpg",
+      "class_b": "scratches"
+    },
+    {
+      "pixel_corr": 0.9903,
+      "cosine": 0.9185,
+      "path_a": "NEU-DET/train/images/scratches/scratches_116.jpg",
+      "class_a": "scratches",
+      "path_b": "NEU-DET/train/images/scratches/scratches_118.jpg",
+      "class_b": "scratches"
+    },
+    {
+      "pixel_corr": 0.9895,
+      "cosine": 0.958,
+      "path_a": "NEU-DET/train/images/pitted_surface/pitted_surface_170.jpg",
+      "class_a": "pitted_surface",
+      "path_b": "NEU-DET/validation/images/pitted_surface/pitted_surface_296.jpg",
+      "class_b": "pitted_surface"
+    },
+    {
+      "pixel_corr": 0.9893,
+      "cosine": 0.9549,
+      "path_a": "NEU-DET/train/images/pitted_surface/pitted_surface_175.jpg",
+      "class_a": "pitted_surface",
+      "path_b": "NEU-DET/validation/images/pitted_surface/pitted_surface_296.jpg",
+      "class_b": "pitted_surface"
+    },
+    {
+      "pixel_corr": 0.9893,
+      "cosine": 0.8838,
+      "path_a": "NEU-DET/train/images/scratches/scratches_8.jpg",
+      "class_a": "scratches",
+      "path_b": "NEU-DET/train/images/scratches/scratches_9.jpg",
+      "class_b": "scratches"
+    },
+    {
+      "pixel_corr": 0.989,
+      "cosine": 0.9362,
+      "path_a": "NEU-DET/train/images/pitted_surface/pitted_surface_169.jpg",
+      "class_a": "pitted_surface",
+      "path_b": "NEU-DET/validation/images/pitted_surface/pitted_surface_293.jpg",
+      "class_b": "pitted_surface"
+    },
+    {
+      "pixel_corr": 0.9889,
+      "cosine": 0.8672,
+      "path_a": "NEU-DET/train/images/scratches/scratches_4.jpg",
+      "class_a": "scratches",
+      "path_b": "NEU-DET/train/images/scratches/scratches_5.jpg",
+      "class_b": "scratches"
+    },
+    {
+      "pixel_corr": 0.9885,
+      "cosine": 0.8688,
+      "path_a": "NEU-DET/train/images/scratches/scratches_29.jpg",
+      "class_a": "scratches",
+      "path_b": "NEU-DET/train/images/scratches/scratches_30.jpg",
+      "class_b": "scratches"
+    }
+  ],
+  "watch_pairs": [
+    {
+      "path_a": "NEU-DET/train/images/patches/patches_193.jpg",
+      "path_b": "NEU-DET/train/images/patches/patches_189.jpg",
+      "cosine": 0.9545,
+      "cosine_rank_among_all_pairs": 1879,
+      "pixel_corr": 0.9806,
+      "confirmed": true
+    }
+  ],
+  "params": {
+    "model": "efficientnet_b0",
+    "batch_size": 32,
+    "seed": 7,
+    "report_cosines": [
+      0.85,
+      0.9,
+      0.95,
+      0.97,
+      0.98
+    ],
+    "report_pixel_corrs": [
+      0.2,
+      0.3,
+      0.5,
+      0.7,
+      0.9
+    ],
+    "candidate_cosine": 0.85,
+    "confirm_pixel_corr": 0.3,
+    "keep_pixel_corr": 0.1,
+    "highpass_px": 9,
+    "max_shift": 48,
+    "calib_same_class_pairs": 20000,
+    "calib_pixel_pairs": 5000,
+    "calib_shift_images_per_class": 30,
+    "calib_shifts": [
+      8,
+      16,
+      32
+    ],
+    "max_candidates": 150000,
+    "summary_top_k": 20,
+    "grid_top_k": 24,
+    "watch_pairs": [
+      [
+        "patches_193.jpg",
+        "patches_189.jpg"
+      ]
+    ]
+  }
+}

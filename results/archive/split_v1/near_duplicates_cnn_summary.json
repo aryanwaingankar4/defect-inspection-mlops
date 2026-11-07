@@ -1,0 +1,312 @@
+{
+  "split_file": "data/splits/neu_split_v1.csv",
+  "pairs_file": "data/splits/near_copy_pairs.csv",
+  "confirm_pixel_corr_ge": 0.3,
+  "confirmed_cross_split": 193,
+  "confirmed_cross_split_by_split_pair": {
+    "production_stream / test_frozen": 80,
+    "production_stream / train_v1": 40,
+    "production_stream / val": 46,
+    "test_frozen / train_v1": 10,
+    "test_frozen / val": 13,
+    "train_v1 / val": 4
+  },
+  "cross_split_overlaps_pixel_corr_ge": {
+    "0.1": {
+      "pairs": 650,
+      "by_split_pair": {
+        "production_stream / test_frozen": 250,
+        "production_stream / train_v1": 137,
+        "production_stream / val": 153,
+        "test_frozen / train_v1": 48,
+        "test_frozen / val": 39,
+        "train_v1 / val": 23
+      }
+    },
+    "0.2": {
+      "pairs": 257,
+      "by_split_pair": {
+        "production_stream / test_frozen": 107,
+        "production_stream / train_v1": 52,
+        "production_stream / val": 59,
+        "test_frozen / train_v1": 15,
+        "test_frozen / val": 17,
+        "train_v1 / val": 7
+      }
+    },
+    "0.3": {
+      "pairs": 193,
+      "by_split_pair": {
+        "production_stream / test_frozen": 80,
+        "production_stream / train_v1": 40,
+        "production_stream / val": 46,
+        "test_frozen / train_v1": 10,
+        "test_frozen / val": 13,
+        "train_v1 / val": 4
+      }
+    },
+    "0.5": {
+      "pairs": 132,
+      "by_split_pair": {
+        "production_stream / test_frozen": 55,
+        "production_stream / train_v1": 27,
+        "production_stream / val": 33,
+        "test_frozen / train_v1": 6,
+        "test_frozen / val": 7,
+        "train_v1 / val": 4
+      }
+    },
+    "0.7": {
+      "pairs": 95,
+      "by_split_pair": {
+        "production_stream / test_frozen": 39,
+        "production_stream / train_v1": 16,
+        "production_stream / val": 26,
+        "test_frozen / train_v1": 4,
+        "test_frozen / val": 7,
+        "train_v1 / val": 3
+      }
+    },
+    "0.9": {
+      "pairs": 57,
+      "by_split_pair": {
+        "production_stream / test_frozen": 28,
+        "production_stream / train_v1": 7,
+        "production_stream / val": 13,
+        "test_frozen / train_v1": 3,
+        "test_frozen / val": 6
+      }
+    }
+  },
+  "top_cross_split": [
+    {
+      "pixel_corr": 1.0,
+      "cosine": 0.9773,
+      "confirmed": 1,
+      "path_a": "NEU-DET/train/images/pitted_surface/pitted_surface_202.jpg",
+      "class_a": "pitted_surface",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/train/images/pitted_surface/pitted_surface_204.jpg",
+      "class_b": "pitted_surface",
+      "split_b": "test_frozen"
+    },
+    {
+      "pixel_corr": 0.9918,
+      "cosine": 0.8934,
+      "confirmed": 1,
+      "path_a": "NEU-DET/validation/images/scratches/scratches_250.jpg",
+      "class_a": "scratches",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/validation/images/scratches/scratches_254.jpg",
+      "class_b": "scratches",
+      "split_b": "val"
+    },
+    {
+      "pixel_corr": 0.9918,
+      "cosine": 0.8735,
+      "confirmed": 1,
+      "path_a": "NEU-DET/train/images/scratches/scratches_5.jpg",
+      "class_a": "scratches",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/train/images/scratches/scratches_6.jpg",
+      "class_b": "scratches",
+      "split_b": "test_frozen"
+    },
+    {
+      "pixel_corr": 0.9911,
+      "cosine": 0.9528,
+      "confirmed": 1,
+      "path_a": "NEU-DET/train/images/pitted_surface/pitted_surface_165.jpg",
+      "class_a": "pitted_surface",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/validation/images/pitted_surface/pitted_surface_291.jpg",
+      "class_b": "pitted_surface",
+      "split_b": "test_frozen"
+    },
+    {
+      "pixel_corr": 0.9905,
+      "cosine": 0.9392,
+      "confirmed": 1,
+      "path_a": "NEU-DET/train/images/scratches/scratches_178.jpg",
+      "class_a": "scratches",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/train/images/scratches/scratches_185.jpg",
+      "class_b": "scratches",
+      "split_b": "val"
+    },
+    {
+      "pixel_corr": 0.9893,
+      "cosine": 0.8838,
+      "confirmed": 1,
+      "path_a": "NEU-DET/train/images/scratches/scratches_8.jpg",
+      "class_a": "scratches",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/train/images/scratches/scratches_9.jpg",
+      "class_b": "scratches",
+      "split_b": "test_frozen"
+    },
+    {
+      "pixel_corr": 0.989,
+      "cosine": 0.9362,
+      "confirmed": 1,
+      "path_a": "NEU-DET/train/images/pitted_surface/pitted_surface_169.jpg",
+      "class_a": "pitted_surface",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/validation/images/pitted_surface/pitted_surface_293.jpg",
+      "class_b": "pitted_surface",
+      "split_b": "test_frozen"
+    },
+    {
+      "pixel_corr": 0.9889,
+      "cosine": 0.8672,
+      "confirmed": 1,
+      "path_a": "NEU-DET/train/images/scratches/scratches_4.jpg",
+      "class_a": "scratches",
+      "split_a": "train_v1",
+      "path_b": "NEU-DET/train/images/scratches/scratches_5.jpg",
+      "class_b": "scratches",
+      "split_b": "production_stream"
+    },
+    {
+      "pixel_corr": 0.9878,
+      "cosine": 0.9689,
+      "confirmed": 1,
+      "path_a": "NEU-DET/train/images/crazing/crazing_239.jpg",
+      "class_a": "crazing",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/train/images/crazing/crazing_240.jpg",
+      "class_b": "crazing",
+      "split_b": "test_frozen"
+    },
+    {
+      "pixel_corr": 0.9867,
+      "cosine": 0.9521,
+      "confirmed": 1,
+      "path_a": "NEU-DET/validation/images/crazing/crazing_271.jpg",
+      "class_a": "crazing",
+      "split_a": "test_frozen",
+      "path_b": "NEU-DET/validation/images/crazing/crazing_273.jpg",
+      "class_b": "crazing",
+      "split_b": "production_stream"
+    },
+    {
+      "pixel_corr": 0.9857,
+      "cosine": 0.9479,
+      "confirmed": 1,
+      "path_a": "NEU-DET/validation/images/pitted_surface/pitted_surface_259.jpg",
+      "class_a": "pitted_surface",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/validation/images/pitted_surface/pitted_surface_269.jpg",
+      "class_b": "pitted_surface",
+      "split_b": "val"
+    },
+    {
+      "pixel_corr": 0.985,
+      "cosine": 0.9696,
+      "confirmed": 1,
+      "path_a": "NEU-DET/train/images/patches/patches_199.jpg",
+      "class_a": "patches",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/train/images/patches/patches_201.jpg",
+      "class_b": "patches",
+      "split_b": "test_frozen"
+    },
+    {
+      "pixel_corr": 0.985,
+      "cosine": 0.9605,
+      "confirmed": 1,
+      "path_a": "NEU-DET/validation/images/pitted_surface/pitted_surface_255.jpg",
+      "class_a": "pitted_surface",
+      "split_a": "val",
+      "path_b": "NEU-DET/validation/images/pitted_surface/pitted_surface_259.jpg",
+      "class_b": "pitted_surface",
+      "split_b": "production_stream"
+    },
+    {
+      "pixel_corr": 0.9848,
+      "cosine": 0.9841,
+      "confirmed": 1,
+      "path_a": "NEU-DET/train/images/crazing/crazing_175.jpg",
+      "class_a": "crazing",
+      "split_a": "test_frozen",
+      "path_b": "NEU-DET/train/images/crazing/crazing_177.jpg",
+      "class_b": "crazing",
+      "split_b": "val"
+    },
+    {
+      "pixel_corr": 0.984,
+      "cosine": 0.9522,
+      "confirmed": 1,
+      "path_a": "NEU-DET/train/images/crazing/crazing_93.jpg",
+      "class_a": "crazing",
+      "split_a": "val",
+      "path_b": "NEU-DET/train/images/crazing/crazing_96.jpg",
+      "class_b": "crazing",
+      "split_b": "test_frozen"
+    },
+    {
+      "pixel_corr": 0.9829,
+      "cosine": 0.9599,
+      "confirmed": 1,
+      "path_a": "NEU-DET/train/images/crazing/crazing_16.jpg",
+      "class_a": "crazing",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/train/images/crazing/crazing_18.jpg",
+      "class_b": "crazing",
+      "split_b": "train_v1"
+    },
+    {
+      "pixel_corr": 0.9828,
+      "cosine": 0.9154,
+      "confirmed": 1,
+      "path_a": "NEU-DET/validation/images/pitted_surface/pitted_surface_254.jpg",
+      "class_a": "pitted_surface",
+      "split_a": "val",
+      "path_b": "NEU-DET/validation/images/pitted_surface/pitted_surface_258.jpg",
+      "class_b": "pitted_surface",
+      "split_b": "test_frozen"
+    },
+    {
+      "pixel_corr": 0.9824,
+      "cosine": 0.9126,
+      "confirmed": 1,
+      "path_a": "NEU-DET/train/images/scratches/scratches_136.jpg",
+      "class_a": "scratches",
+      "split_a": "test_frozen",
+      "path_b": "NEU-DET/train/images/scratches/scratches_137.jpg",
+      "class_b": "scratches",
+      "split_b": "val"
+    },
+    {
+      "pixel_corr": 0.982,
+      "cosine": 0.9508,
+      "confirmed": 1,
+      "path_a": "NEU-DET/train/images/pitted_surface/pitted_surface_185.jpg",
+      "class_a": "pitted_surface",
+      "split_a": "test_frozen",
+      "path_b": "NEU-DET/train/images/pitted_surface/pitted_surface_187.jpg",
+      "class_b": "pitted_surface",
+      "split_b": "train_v1"
+    },
+    {
+      "pixel_corr": 0.9819,
+      "cosine": 0.8822,
+      "confirmed": 1,
+      "path_a": "NEU-DET/train/images/scratches/scratches_215.jpg",
+      "class_a": "scratches",
+      "split_a": "test_frozen",
+      "path_b": "NEU-DET/train/images/scratches/scratches_227.jpg",
+      "class_b": "scratches",
+      "split_b": "production_stream"
+    }
+  ],
+  "watch_pairs": [
+    {
+      "path_a": "NEU-DET/train/images/patches/patches_193.jpg",
+      "split_a": "test_frozen",
+      "path_b": "NEU-DET/train/images/patches/patches_189.jpg",
+      "split_b": "production_stream",
+      "same_split": false
+    }
+  ]
+}

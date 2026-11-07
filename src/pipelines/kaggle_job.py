@@ -4,7 +4,8 @@
     python -m src.pipelines.kaggle_job --config configs/params.yaml status
     python -m src.pipelines.kaggle_job --config configs/params.yaml output
 
-``push`` refuses uncommitted changes and commits that are not on GitHub, renders the launcher
+``push`` refuses uncommitted changes, commits that are not on GitHub, and a split whose
+committed near-copy report is missing or not clean (ADR-021). It renders the launcher
 notebook with the HEAD commit into ``kaggle.kernel_dir`` with a PRIVATE kernel-metadata.json
 (GPU T4, internet on, private dataset attached), and pushes it, which starts the run. The
 notebook has no logic and no credentials: it clones the repo at that commit, installs the
@@ -53,6 +54,25 @@ def pinned_commit(run_git: Git = git) -> str:
     if not run_git("branch", "-r", "--contains", sha):
         raise LaunchError(f"commit {sha[:7]} is not pushed: Kaggle clones it from GitHub")
     return sha
+
+
+def check_split_is_clean(params: Mapping[str, Any], root: Path = REPO_ROOT) -> None:
+    """Training needs the committed near-copy report of THIS split with 0 confirmed near-copies
+    across splits (TASK-008b, ADR-021): ``make near-dups-cnn`` writes it."""
+    path = root / params["near_duplicates_cnn"]["out_summary"]
+    if not path.is_file():
+        raise LaunchError(f"no near-copy report {path.name}: run `make near-dups-cnn` first")
+    report = json.loads(path.read_text(encoding="utf-8"))
+    if report.get("split_file") != params["data"]["split_file"]:
+        raise LaunchError(
+            f"near-copy report is for {report.get('split_file')}, "
+            f"not data.split_file {params['data']['split_file']}"
+        )
+    if report.get("confirmed_cross_split") != 0:
+        raise LaunchError(
+            f"{report.get('confirmed_cross_split')} confirmed near-copies cross splits "
+            f"in {params['data']['split_file']}: fix the split before training"
+        )
 
 
 def render_notebook(template: str, values: Mapping[str, str]) -> str:
@@ -159,6 +179,7 @@ def main(argv: list[str] | None = None) -> int:
     ref = f"{owner}/{k['kernel_slug']}"
 
     if args.cmd == "push":
+        check_split_is_clean(params)
         commit = pinned_commit()
         extra = train_args(args.model)
         folder = build_kernel_dir(params, owner, commit, Path(k["kernel_dir"]), extra)

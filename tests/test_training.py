@@ -196,7 +196,8 @@ def test_cli_overrides_paths_and_workers() -> None:
         ]
     )
     p = train_mod.apply_overrides(PARAMS, args)
-    assert p["data"] == {"raw_dir": "/kaggle/input/neu", "split_file": "/kaggle/working/split.csv"}
+    assert p["data"]["raw_dir"] == "/kaggle/input/neu"
+    assert p["data"]["split_file"] == "/kaggle/working/split.csv"
     assert p["train"]["out_checkpoint"] == "/kaggle/working/m.pt"
     assert p["train"]["out_dir"] == "/kaggle/working/results"
     assert p["train"]["num_workers"] == 4
@@ -262,7 +263,7 @@ def test_tiny_training_run_writes_outputs(synthetic_data, tmp_path) -> None:
     digest = hashlib.sha256((tmp_path / "best.pt").read_bytes()).hexdigest()
     assert saved["checkpoint_sha256"] == digest
     assert saved["provenance"]["runtime"] == "local"
-    assert {"git_dirty", "torch", "timm"} <= set(saved["provenance"])
+    assert {"git_dirty", "torch", "timm", "split_file", "split_sha256"} <= set(saved["provenance"])
 
     ckpt = torch.load(tmp_path / "best.pt", map_location="cpu", weights_only=True)
     assert ckpt["classes"] == CLASSES and ckpt["preprocess"]["image_size"] == 32

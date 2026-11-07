@@ -21,6 +21,10 @@ PARAMS = load_params(REPO_ROOT / "configs" / "params.yaml")
 CARD = REPO_ROOT / "docs" / "DATA_CARD.md"
 SPLIT_CSV = REPO_ROOT / PARAMS["data"]["split_file"]
 SUMMARY_JSON = REPO_ROOT / PARAMS["near_duplicates"]["out_summary"]
+NEAR_COPIES_JSON = REPO_ROOT / PARAMS["near_duplicates_cnn"]["pairs_summary"]
+CNN_REPORT_JSON = REPO_ROOT / PARAMS["near_duplicates_cnn"]["out_summary"]
+ARCHIVE_V1 = REPO_ROOT / "results" / "archive" / "split_v1"
+CNN_REPORT_V1_JSON = ARCHIVE_V1 / "near_duplicates_cnn_summary.json"
 
 
 def _table(header: list[str], rows: list[list[str]]) -> str:
@@ -73,6 +77,44 @@ def render_near_dups(summary: dict) -> str:
     return "\n".join(lines)
 
 
+def render_near_copies(s: dict) -> str:
+    """Key facts from the TASK-008b pairs step (all image pairs, split-independent)."""
+    r, cal = s["rule"], s["calibration"]
+    pix = cal["pixel_corr_random_same_class"]
+    shift16 = cal["cosine_shifted_crops"]["by_shift_px"]["16"]["same_image"]
+    g = s["groups"]
+    (w,) = s["watch_pairs"]
+    by_class = ", ".join(f"`{c}` {n}" for c, n in g["images_by_class"].items())
+    return "\n".join(
+        [
+            f"- Image pairs compared (any split): {s['pairs_compared']:,}.",
+            f"- CNN candidates (cosine >= {r['candidate_cosine_ge']:g}): {s['candidates']:,}. "
+            f"Synthetic copies shifted 16 px: cosine p5 {shift16['p5']}, p1 {shift16['p1']}.",
+            f"- Pixel correlation of {pix['pairs']:,} random same-class pairs: "
+            f"median {pix['p50']}, p95 {pix['p95']}, p99 {pix['p99']}.",
+            f"- Confirmed near-copies (pixel correlation >= {r['confirm_pixel_corr_ge']:g}, shifts "
+            f"up to {r['max_shift_px']} px): {s['confirmed_pairs']} pairs, "
+            f"{len(s['confirmed_different_class'])} between different classes.",
+            f"- Groups: {g['count']} groups, {g['images']} images, largest {g['largest']['size']} "
+            f"images. Images in groups by class: {by_class}.",
+            f"- `{Path(w['path_a']).name}` / `{Path(w['path_b']).name}` (suspected in TASK-004): "
+            f"cosine {w['cosine']} (rank {w['cosine_rank_among_all_pairs']:,}), pixel correlation "
+            f"{w['pixel_corr']}, confirmed: {'yes' if w['confirmed'] else 'no'}.",
+        ]
+    )
+
+
+def render_near_copies_by_split(v1: dict, v2: dict) -> str:
+    """Confirmed near-copies across splits: v1 (archive) vs the current split."""
+    a, b = v1["confirmed_cross_split_by_split_pair"], v2["confirmed_cross_split_by_split_pair"]
+    body = [[f"`{k}`", str(a.get(k, 0)), str(b.get(k, 0))] for k in sorted({*a, *b})]
+    body.append(
+        ["**total**", f"**{v1['confirmed_cross_split']}**", f"**{v2['confirmed_cross_split']}**"]
+    )
+    header = ["split pair", f"`{Path(v1['split_file']).name}`", f"`{Path(v2['split_file']).name}`"]
+    return _table(header, body)
+
+
 def expected_blocks() -> dict[str, str]:
     rows = read_split_csv(SPLIT_CSV)
     summary = json.loads(SUMMARY_JSON.read_text(encoding="utf-8"))
@@ -81,7 +123,15 @@ def expected_blocks() -> dict[str, str]:
         "split-counts": render_split_counts(rows, split_order),
         "uploader-folders": render_uploader_folders(rows),
         "near-dups": render_near_dups(summary),
+        "near-copies": render_near_copies(_load(NEAR_COPIES_JSON)),
+        "near-copies-by-split": render_near_copies_by_split(
+            _load(CNN_REPORT_V1_JSON), _load(CNN_REPORT_JSON)
+        ),
     }
+
+
+def _load(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def card_blocks(text: str) -> dict[str, str]:

@@ -29,6 +29,11 @@ def out_options(stage: str, kind: str = "outs") -> dict[str, dict]:
     ("stage", "kind", "path"),
     [
         ("split", "outs", "data/splits/neu_split_v1.csv"),
+        ("split", "outs", "data/splits/neu_split_v2.csv"),
+        ("near_copies", "outs", "data/splits/near_copy_pairs.csv"),
+        ("near_copies", "metrics", "results/near_copies_summary.json"),
+        ("near_dups_cnn", "outs", "results/near_duplicates_cnn.csv"),
+        ("near_dups_cnn", "metrics", "results/near_duplicates_cnn_summary.json"),
         ("near_dups", "outs", "results/near_duplicates.csv"),
         ("near_dups", "metrics", "results/near_duplicates_summary.json"),
     ],
@@ -39,6 +44,15 @@ def test_git_tracked_outputs_are_not_cached(stage: str, kind: str, path: str) ->
 
 def test_split_output_matches_params() -> None:
     assert PARAMS["data"]["split_file"] in out_options("split")
+    assert PARAMS["data"]["split_file_v1"] in out_options("split")
+    assert PARAMS["near_duplicates_cnn"]["pairs_file"] in out_options("near_copies")
+
+
+def test_reports_read_the_current_split() -> None:
+    """The near-copy gate and pHash report run on data.split_file (v2), not on v1."""
+    for stage in ("near_dups", "near_dups_cnn"):
+        assert PARAMS["data"]["split_file"] in DVC_YAML["stages"][stage]["deps"]
+    assert "--require-clean" in DVC_YAML["stages"]["near_dups_cnn"]["cmd"]
 
 
 def test_private_pixels_are_never_git_outputs() -> None:

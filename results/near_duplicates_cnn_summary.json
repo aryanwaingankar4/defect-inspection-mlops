@@ -1,0 +1,277 @@
+{
+  "split_file": "data/splits/neu_split_v2.csv",
+  "pairs_file": "data/splits/near_copy_pairs.csv",
+  "confirm_pixel_corr_ge": 0.3,
+  "confirmed_cross_split": 0,
+  "confirmed_cross_split_by_split_pair": {},
+  "cross_split_overlaps_pixel_corr_ge": {
+    "0.1": {
+      "pairs": 401,
+      "by_split_pair": {
+        "production_stream / test_frozen": 162,
+        "production_stream / train_v1": 67,
+        "production_stream / val": 107,
+        "test_frozen / train_v1": 32,
+        "test_frozen / val": 23,
+        "train_v1 / val": 10
+      }
+    },
+    "0.2": {
+      "pairs": 40,
+      "by_split_pair": {
+        "production_stream / test_frozen": 17,
+        "production_stream / train_v1": 5,
+        "production_stream / val": 11,
+        "test_frozen / train_v1": 3,
+        "test_frozen / val": 4
+      }
+    },
+    "0.3": {
+      "pairs": 0,
+      "by_split_pair": {}
+    },
+    "0.5": {
+      "pairs": 0,
+      "by_split_pair": {}
+    },
+    "0.7": {
+      "pairs": 0,
+      "by_split_pair": {}
+    },
+    "0.9": {
+      "pairs": 0,
+      "by_split_pair": {}
+    }
+  },
+  "top_cross_split": [
+    {
+      "pixel_corr": 0.2981,
+      "cosine": 0.856,
+      "confirmed": 0,
+      "path_a": "NEU-DET/train/images/scratches/scratches_161.jpg",
+      "class_a": "scratches",
+      "split_a": "test_frozen",
+      "path_b": "NEU-DET/train/images/scratches/scratches_163.jpg",
+      "class_b": "scratches",
+      "split_b": "production_stream"
+    },
+    {
+      "pixel_corr": 0.2939,
+      "cosine": 0.8505,
+      "confirmed": 0,
+      "path_a": "NEU-DET/train/images/scratches/scratches_173.jpg",
+      "class_a": "scratches",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/train/images/scratches/scratches_33.jpg",
+      "class_b": "scratches",
+      "split_b": "train_v1"
+    },
+    {
+      "pixel_corr": 0.2933,
+      "cosine": 0.8723,
+      "confirmed": 0,
+      "path_a": "NEU-DET/train/images/pitted_surface/pitted_surface_183.jpg",
+      "class_a": "pitted_surface",
+      "split_a": "test_frozen",
+      "path_b": "NEU-DET/train/images/pitted_surface/pitted_surface_186.jpg",
+      "class_b": "pitted_surface",
+      "split_b": "train_v1"
+    },
+    {
+      "pixel_corr": 0.2925,
+      "cosine": 0.8674,
+      "confirmed": 0,
+      "path_a": "NEU-DET/validation/images/scratches/scratches_270.jpg",
+      "class_a": "scratches",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/validation/images/scratches/scratches_271.jpg",
+      "class_b": "scratches",
+      "split_b": "test_frozen"
+    },
+    {
+      "pixel_corr": 0.2839,
+      "cosine": 0.9354,
+      "confirmed": 0,
+      "path_a": "NEU-DET/validation/images/scratches/scratches_266.jpg",
+      "class_a": "scratches",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/validation/images/scratches/scratches_267.jpg",
+      "class_b": "scratches",
+      "split_b": "test_frozen"
+    },
+    {
+      "pixel_corr": 0.2785,
+      "cosine": 0.8516,
+      "confirmed": 0,
+      "path_a": "NEU-DET/train/images/scratches/scratches_161.jpg",
+      "class_a": "scratches",
+      "split_a": "test_frozen",
+      "path_b": "NEU-DET/train/images/scratches/scratches_164.jpg",
+      "class_b": "scratches",
+      "split_b": "production_stream"
+    },
+    {
+      "pixel_corr": 0.2781,
+      "cosine": 0.8705,
+      "confirmed": 0,
+      "path_a": "NEU-DET/train/images/inclusion/inclusion_6.jpg",
+      "class_a": "inclusion",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/train/images/inclusion/inclusion_8.jpg",
+      "class_b": "inclusion",
+      "split_b": "val"
+    },
+    {
+      "pixel_corr": 0.2779,
+      "cosine": 0.9637,
+      "confirmed": 0,
+      "path_a": "NEU-DET/train/images/rolled-in_scale/rolled-in_scale_66.jpg",
+      "class_a": "rolled-in_scale",
+      "split_a": "val",
+      "path_b": "NEU-DET/train/images/rolled-in_scale/rolled-in_scale_67.jpg",
+      "class_b": "rolled-in_scale",
+      "split_b": "production_stream"
+    },
+    {
+      "pixel_corr": 0.2704,
+      "cosine": 0.8594,
+      "confirmed": 0,
+      "path_a": "NEU-DET/train/images/scratches/scratches_197.jpg",
+      "class_a": "scratches",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/train/images/scratches/scratches_205.jpg",
+      "class_b": "scratches",
+      "split_b": "test_frozen"
+    },
+    {
+      "pixel_corr": 0.2701,
+      "cosine": 0.88,
+      "confirmed": 0,
+      "path_a": "NEU-DET/train/images/scratches/scratches_195.jpg",
+      "class_a": "scratches",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/train/images/scratches/scratches_91.jpg",
+      "class_b": "scratches",
+      "split_b": "test_frozen"
+    },
+    {
+      "pixel_corr": 0.2633,
+      "cosine": 0.9471,
+      "confirmed": 0,
+      "path_a": "NEU-DET/train/images/inclusion/inclusion_152.jpg",
+      "class_a": "inclusion",
+      "split_a": "val",
+      "path_b": "NEU-DET/train/images/inclusion/inclusion_163.jpg",
+      "class_b": "inclusion",
+      "split_b": "test_frozen"
+    },
+    {
+      "pixel_corr": 0.2547,
+      "cosine": 0.9548,
+      "confirmed": 0,
+      "path_a": "NEU-DET/train/images/scratches/scratches_77.jpg",
+      "class_a": "scratches",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/train/images/scratches/scratches_80.jpg",
+      "class_b": "scratches",
+      "split_b": "test_frozen"
+    },
+    {
+      "pixel_corr": 0.2519,
+      "cosine": 0.8522,
+      "confirmed": 0,
+      "path_a": "NEU-DET/train/images/inclusion/inclusion_143.jpg",
+      "class_a": "inclusion",
+      "split_a": "val",
+      "path_b": "NEU-DET/validation/images/inclusion/inclusion_288.jpg",
+      "class_b": "inclusion",
+      "split_b": "production_stream"
+    },
+    {
+      "pixel_corr": 0.2467,
+      "cosine": 0.9681,
+      "confirmed": 0,
+      "path_a": "NEU-DET/train/images/scratches/scratches_73.jpg",
+      "class_a": "scratches",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/train/images/scratches/scratches_80.jpg",
+      "class_b": "scratches",
+      "split_b": "test_frozen"
+    },
+    {
+      "pixel_corr": 0.2423,
+      "cosine": 0.8619,
+      "confirmed": 0,
+      "path_a": "NEU-DET/validation/images/scratches/scratches_252.jpg",
+      "class_a": "scratches",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/validation/images/scratches/scratches_253.jpg",
+      "class_b": "scratches",
+      "split_b": "val"
+    },
+    {
+      "pixel_corr": 0.2396,
+      "cosine": 0.9109,
+      "confirmed": 0,
+      "path_a": "NEU-DET/train/images/scratches/scratches_176.jpg",
+      "class_a": "scratches",
+      "split_a": "test_frozen",
+      "path_b": "NEU-DET/train/images/scratches/scratches_177.jpg",
+      "class_b": "scratches",
+      "split_b": "production_stream"
+    },
+    {
+      "pixel_corr": 0.2339,
+      "cosine": 0.8856,
+      "confirmed": 0,
+      "path_a": "NEU-DET/train/images/scratches/scratches_240.jpg",
+      "class_a": "scratches",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/validation/images/scratches/scratches_241.jpg",
+      "class_b": "scratches",
+      "split_b": "val"
+    },
+    {
+      "pixel_corr": 0.2338,
+      "cosine": 0.874,
+      "confirmed": 0,
+      "path_a": "NEU-DET/train/images/scratches/scratches_152.jpg",
+      "class_a": "scratches",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/train/images/scratches/scratches_154.jpg",
+      "class_b": "scratches",
+      "split_b": "val"
+    },
+    {
+      "pixel_corr": 0.2336,
+      "cosine": 0.8529,
+      "confirmed": 0,
+      "path_a": "NEU-DET/train/images/scratches/scratches_108.jpg",
+      "class_a": "scratches",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/train/images/scratches/scratches_176.jpg",
+      "class_b": "scratches",
+      "split_b": "test_frozen"
+    },
+    {
+      "pixel_corr": 0.2323,
+      "cosine": 0.8692,
+      "confirmed": 0,
+      "path_a": "NEU-DET/train/images/scratches/scratches_78.jpg",
+      "class_a": "scratches",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/train/images/scratches/scratches_80.jpg",
+      "class_b": "scratches",
+      "split_b": "test_frozen"
+    }
+  ],
+  "watch_pairs": [
+    {
+      "path_a": "NEU-DET/train/images/patches/patches_193.jpg",
+      "split_a": "production_stream",
+      "path_b": "NEU-DET/train/images/patches/patches_189.jpg",
+      "split_b": "production_stream",
+      "same_split": true
+    }
+  ]
+}

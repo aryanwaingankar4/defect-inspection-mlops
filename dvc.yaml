@@ -1,22 +1,53 @@
-# Pipeline stages. Run with `make repro` (uv run --locked dvc repro).
+# Pipeline stages. Run with `make repro` (uv run --locked --group train dvc repro).
 # data/raw is tracked with `dvc add` (data/raw.dvc); remote = private local folder (ADR-018).
+# Order: near_copies (all image pairs) -> split (v1 + group-aware v2, ADR-021) -> reports on v2.
 stages:
-  split:
-    cmd: python -m src.data.split --config configs/params.yaml
+  near_copies:                 # TASK-008b: pretrained-CNN forward passes on CPU (no training) + pixel check
+    cmd: python -m src.data.near_duplicates_cnn pairs --config configs/params.yaml
     deps:
-      - src/data/split.py
-      - src/data/download.py   # IMAGE_SUFFIXES
+      - src/data/near_duplicates_cnn.py
+      - src/data/groups.py
+      - src/data/split.py       # list_images
+      - src/data/download.py    # IMAGE_SUFFIXES
+      - src/serving/preprocess.py
+      - src/training/train.py   # build_model
       - src/config.py
       - data/raw
     params:
       - configs/params.yaml:
+          - near_duplicates_cnn
+          - preprocess
+    outs:
+      - data/splits/near_copy_pairs.csv:
+          cache: false           # committed to git (paths and scores only, no pixels)
+    metrics:
+      - results/near_copies_summary.json:
+          cache: false           # committed to git
+
+  split:
+    cmd: python -m src.data.split --config configs/params.yaml
+    deps:
+      - src/data/split.py
+      - src/data/groups.py
+      - src/data/download.py   # IMAGE_SUFFIXES
+      - src/config.py
+      - data/raw
+      - data/splits/near_copy_pairs.csv
+    params:
+      - configs/params.yaml:
           - data.raw_dir
           - data.split_file
+          - data.split_file_v1
           - split.seed
           - split.per_class
+          - split.groups
+          - near_duplicates_cnn.pairs_file
+          - near_duplicates_cnn.confirm_pixel_corr
     outs:
       - data/splits/neu_split_v1.csv:
-          cache: false           # committed to git (TASK-003)
+          cache: false           # committed to git (TASK-003; kept for history, ADR-021)
+      - data/splits/neu_split_v2.csv:
+          cache: false           # committed to git (group-aware, ADR-021)
 
   near_dups:
     cmd: python -m src.data.near_duplicates --config configs/params.yaml
@@ -25,9 +56,10 @@ stages:
       - src/data/split.py
       - src/config.py
       - data/raw
-      - data/splits/neu_split_v1.csv
+      - data/splits/neu_split_v2.csv
     params:
       - configs/params.yaml:
+          - data.split_file
           - near_duplicates
     outs:
       - results/near_duplicates.csv:
@@ -35,4 +67,27 @@ stages:
       - results/private/near_duplicates_grid.png   # real NEU pixels: DVC cache only, never git
     metrics:
       - results/near_duplicates_summary.json:
+          cache: false           # committed to git
+
+  near_dups_cnn:               # fails if any confirmed near-copy crosses splits (--require-clean)
+    cmd: python -m src.data.near_duplicates_cnn report --config configs/params.yaml --require-clean
+    deps:
+      - src/data/near_duplicates_cnn.py
+      - src/data/groups.py
+      - src/data/split.py
+      - src/config.py
+      - data/raw               # grid only
+      - data/splits/near_copy_pairs.csv
+      - results/near_copies_summary.json
+      - data/splits/neu_split_v2.csv
+    params:
+      - configs/params.yaml:
+          - data.split_file
+          - near_duplicates_cnn
+    outs:
+      - results/near_duplicates_cnn.csv:
+          cache: false           # committed to git
+      - results/private/near_duplicates_cnn_grid.png   # real NEU pixels: DVC cache only, never git
+    metrics:
+      - results/near_duplicates_cnn_summary.json:
           cache: false           # committed to git

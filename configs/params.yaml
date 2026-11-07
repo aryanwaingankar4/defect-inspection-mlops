@@ -2,7 +2,8 @@
 
 data:
   raw_dir: data/raw                              # DVC/git-ignored NEU images (ADR-015)
-  split_file: data/splits/neu_split_v1.csv       # committed: path,class,split
+  split_file: data/splits/neu_split_v2.csv       # committed: path,class,split. Group-aware (ADR-021)
+  split_file_v1: data/splits/neu_split_v1.csv    # first split, kept for history: near-copies cross splits
 
 split:
   seed: 42                                       # split-only seed; independent of training seeds
@@ -12,6 +13,8 @@ split:
     val: 30
     test_frozen: 60
     production_stream: 185
+  groups:                          # v2 only (ADR-021): each group of near-copies stays in one split
+    max_size_outside_last: 3       # bigger groups always go to the last split (production_stream)
 
 preprocess:                        # used by src/serving/preprocess.py only (train, eval, serve)
   image_size: 224                  # square output side in pixels
@@ -77,3 +80,31 @@ near_duplicates:
   out_csv: results/near_duplicates.csv
   out_summary: results/near_duplicates_summary.json
   out_grid: results/private/near_duplicates_grid.png  # real NEU pixels: git-ignored (ADR-015)
+
+near_duplicates_cnn:               # TASK-008b: shift-tolerant check (src/data/near_duplicates_cnn.py)
+  model: efficientnet_b0           # ImageNet-pretrained timm backbone, head removed; NOT our trained model
+  batch_size: 32                   # forward passes only, CPU
+  seed: 7                          # calibration sampling only
+  report_cosines: [0.85, 0.90, 0.95, 0.97, 0.98]   # counts of cross-split pairs with cosine >= t
+  report_pixel_corrs: [0.2, 0.3, 0.5, 0.7, 0.9]    # counts of pairs with pixel corr >= t
+  candidate_cosine: 0.85           # pairs at/above get the pixel check: keeps ~95% of synthetic
+                                   # copies shifted <= 16 px (calibration in pairs_summary)
+  confirm_pixel_corr: 0.3          # near-copy if pixel corr >= this: random same-class pairs have
+                                   # p95 ~0.16; real overlaps seen by eye down to ~0.3 (ADR-021)
+  keep_pixel_corr: 0.1             # candidates at/above go to pairs_file (also near misses)
+  highpass_px: 9                   # local-mean box removed before the pixel check (odd)
+  max_shift: 48                    # pixel check: best over shifts in [-48, 48] px on both axes
+  calib_same_class_pairs: 20000    # random same-class pairs, any split (cosine baseline)
+  calib_pixel_pairs: 5000          # first N of those also get the pixel check
+  calib_shift_images_per_class: 30 # images per class used for synthetic shifted-crop pairs
+  calib_shifts: [8, 16, 32]        # px, applied to both axes; crop side = image side - max
+  max_candidates: 150000           # refuse if more pairs than this reach candidate_cosine
+  summary_top_k: 20                # pairs listed in the summary JSONs
+  grid_top_k: 24                   # cross-split pairs in the private PNG grid
+  watch_pairs:                     # suspected shifted copy from the TASK-004 grid review
+    - [patches_193.jpg, patches_189.jpg]
+  pairs_file: data/splits/near_copy_pairs.csv     # `pairs` step, all splits; committed; read by split
+  pairs_summary: results/near_copies_summary.json # `pairs` step: calibration, counts, groups
+  out_csv: results/near_duplicates_cnn.csv        # `report` step: overlaps across data.split_file
+  out_summary: results/near_duplicates_cnn_summary.json
+  out_grid: results/private/near_duplicates_cnn_grid.png  # real NEU pixels: git-ignored (ADR-015)

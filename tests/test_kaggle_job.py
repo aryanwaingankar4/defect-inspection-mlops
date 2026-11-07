@@ -143,3 +143,34 @@ def test_template_never_prints_secrets() -> None:
 def test_template_keeps_repo_and_venv_out_of_kaggle_output() -> None:
     code = TEMPLATE.read_text(encoding="utf-8")
     assert 'REPO = \\"/tmp/repo\\"' in code
+
+
+def report_root(tmp_path: Path, **report) -> Path:
+    path = tmp_path / PARAMS["near_duplicates_cnn"]["out_summary"]
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(report), encoding="utf-8")
+    return tmp_path
+
+
+def test_push_needs_a_clean_near_copy_report_for_this_split(tmp_path: Path) -> None:
+    split = PARAMS["data"]["split_file"]
+    kj.check_split_is_clean(
+        PARAMS, report_root(tmp_path / "ok", split_file=split, confirmed_cross_split=0)
+    )
+    with pytest.raises(kj.LaunchError, match="no near-copy report"):
+        kj.check_split_is_clean(PARAMS, tmp_path / "missing")
+    with pytest.raises(kj.LaunchError, match="cross splits"):
+        kj.check_split_is_clean(
+            PARAMS, report_root(tmp_path / "dirty", split_file=split, confirmed_cross_split=3)
+        )
+    with pytest.raises(kj.LaunchError, match="not data.split_file"):
+        kj.check_split_is_clean(
+            PARAMS,
+            report_root(
+                tmp_path / "old", split_file="data/splits/old.csv", confirmed_cross_split=0
+            ),
+        )
+
+
+def test_committed_split_passes_the_push_guard() -> None:
+    kj.check_split_is_clean(PARAMS)

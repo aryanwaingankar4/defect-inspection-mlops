@@ -15,7 +15,7 @@ NEU_DATASET := kaustubhdikshit/neu-surface-defect-database/1
 RAW_DIR := data/raw
 PARAMS := configs/params.yaml
 
-.PHONY: help setup lock lint format test test-all check data split near-dups repro push pull train train-smoke \
+.PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
 	register kaggle-dataset kaggle-push kaggle-status kaggle-output
 
 help: ## Show this help
@@ -46,14 +46,20 @@ check: lint test ## Lint + fast tests (what CI runs)
 data: ## Download NEU into data/raw (skips if already complete; needs ~/.kaggle/kaggle.json)
 	$(RUN) python -m src.data.download --dataset $(NEU_DATASET) --out $(RAW_DIR)
 
-split: ## Make the deterministic train_v1/val/test_frozen/production_stream split CSV
+split: ## Make the split CSVs: v1 (history) and group-aware v2 (needs the near-copy pairs file)
 	$(RUN) python -m src.data.split --config $(PARAMS)
 
 near-dups: ## pHash near-duplicate report across splits -> results/ (grid in results/private/)
 	$(RUN) python -m src.data.near_duplicates --config $(PARAMS)
 
-repro: ## Re-run the DVC pipeline (dvc.yaml) where inputs changed
-	$(RUN) dvc repro
+near-copies: ## Score all image pairs for overlaps (pretrained CNN on CPU + pixel check; ~15 min)
+	$(RUN_TRAIN) python -m src.data.near_duplicates_cnn pairs --config $(PARAMS)
+
+near-dups-cnn: ## Overlaps across the current split -> results/; fails if any confirmed one crosses
+	$(RUN_TRAIN) python -m src.data.near_duplicates_cnn report --config $(PARAMS) --require-clean
+
+repro: ## Re-run the DVC pipeline (dvc.yaml) where inputs changed (near_dups_cnn needs torch)
+	$(RUN_TRAIN) dvc repro
 	@echo ""
 	@echo "Reminder: DVC autostage is off. Stage the results by hand:"
 	@echo "  git add dvc.lock   (plus any changed cache: false outputs; see git status)"

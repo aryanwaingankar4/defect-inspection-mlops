@@ -422,6 +422,8 @@ def run(
         "git_dirty": commit["dirty"],
         "dvc_data_md5": dvc_data_md5(repo_root),
         "data_fingerprint": data_fingerprint(raw_dir, train_ds.paths + val_ds.paths),
+        "split_file": split_csv.name,  # which split (ADR-021: v1 had near-copies across splits)
+        "split_sha256": sha256_file(split_csv),
         "torch": torch.__version__,
         "timm": timm.__version__,
         "runtime": runtime_name(),

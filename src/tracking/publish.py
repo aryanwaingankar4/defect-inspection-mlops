@@ -181,7 +181,7 @@ def publish(
         **info,
         "registered_model": cfg.registered_model if info["registered_version"] else None,
     }
-    (run_dir / PUBLISH_RECORD).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    (run_dir / PUBLISH_RECORD).write_bytes((json.dumps(record, indent=2) + "\n").encode())
     return record
 
 

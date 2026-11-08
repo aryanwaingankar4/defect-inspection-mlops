@@ -142,8 +142,8 @@ def claims(val: Mapping[str, Any], cfg: ThresholdConfig, n_groups: int) -> dict[
         "can_claim": [
             f"At threshold {val['threshold']:.4f}, {val['n_routed']} of {val['n_images']} val "
             f"images ({val['routed_share']:.1%}) go to review; {val['errors_routed']} of the "
-            f"{val['n_errors']} val errors are among them and {val['errors_accepted']} are "
-            "auto-accepted.",
+            f"{val['n_errors']} val errors are among them; the other {val['errors_accepted']} "
+            f"{'is' if val['errors_accepted'] == 1 else 'are'} auto-accepted.",
             f"With {cfg.ucb_level:.0%} confidence (one-sided Clopper-Pearson), the error rate "
             f"among auto-accepted images like these is at most {ucb:.1%} (observed "
             f"{val['risk']['value']:.1%}: {val['errors_accepted']} of {val['n_accepted']}).",

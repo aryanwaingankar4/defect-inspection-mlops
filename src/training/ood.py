@@ -219,14 +219,25 @@ def plot_histogram(id_e: np.ndarray, ood: Mapping[str, np.ndarray], t: float, pa
     import matplotlib.pyplot as plt
 
     allv = np.concatenate([id_e, *ood.values()])
-    bins = np.linspace(allv.min(), allv.max(), 60)
+    lo = min(float(id_e.min()), float(np.percentile(allv, 1)))  # keep every val image in view
+    hi = float(allv.max())
+    off = int((allv < lo).sum())
+    bins = np.linspace(lo, hi, 50)
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.hist(id_e, bins=bins, density=True, alpha=0.6, color="tab:blue", label="val (steel)")
+    ax.hist(id_e, bins=bins, alpha=0.6, color="tab:blue", label=f"val (steel), n={len(id_e)}")
     for name, e in ood.items():
-        ax.hist(e, bins=bins, density=True, histtype="step", lw=1.2, label=f"synthetic: {name}")
-    ax.axvline(t, color="tab:red", ls="--", label=f"OOD threshold {t:.2f}")
-    ax.set(xlabel="energy = -T logsumexp(logits / T)  (higher = less familiar)", ylabel="density")
-    ax.set_title("Energy OOD score: val vs synthetic non-steel images")
+        e = e[e >= lo]
+        ax.hist(e, bins=bins, histtype="step", lw=1.2, label=f"synthetic: {name}")
+    ax.axvline(t, color="tab:red", ls="--", label=f"OOD threshold {t:.2f} (flag if above)")
+    ax.set(
+        xlabel="energy = -T logsumexp(logits / T)  (higher = less familiar)",
+        ylabel="images per bin",
+        xlim=(lo, hi + 0.02 * (hi - lo)),
+    )
+    title = "Energy OOD score: val vs synthetic non-steel images"
+    if off:
+        title += f"\n{off} synthetic images with energy below {lo:.1f} are off the left edge"
+    ax.set_title(title)
     ax.legend(fontsize=7, loc="upper left")
     fig.tight_layout()
     fig.savefig(path, dpi=100)

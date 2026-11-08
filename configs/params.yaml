@@ -98,6 +98,15 @@ evaluate:                          # src/training/evaluate.py on test_frozen (TA
     level: 0.95                    # two-sided percentile interval
   out_dir: results/eval            # results/eval/<model>/: test_metrics.json, test_predictions.csv, 2 plots
 
+export:                            # src/training/export_onnx.py (TASK-015, ADR-025): FP32 ONNX of @champion, CPU only
+  opset: 18
+  out_dir: models/onnx             # git-ignored: <registered_model>-v<version>.fp32.onnx
+  report_file: results/onnx/export_report.json
+  batch_size: 32                   # val parity inference
+  batch_sizes: [1, 7, 32]          # dynamic batch axis check
+  parity:                          # on val only; any failure keeps nothing
+    atol: 1.0e-4                   # max |logit_onnx - logit_torch|; classes and review routing must match exactly
+
 promotion:                         # src/tracking/promote.py (TASK-014, ADR-024); gate rules come with ADR-005
   champion_alias: champion         # serves predictions (ADR-001)
   challenger_alias: challenger     # candidate under the promotion gate (Phase 3)

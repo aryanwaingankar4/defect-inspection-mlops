@@ -290,3 +290,126 @@ def compare_calibration(
         else:
             out["verdict"][s] = "no clear change: the interval of the change includes 0"
     return out
+
+
+# ---------------------------------------------------------------- selective risk (TASK-013)
+
+
+def binomial_cdf(k: int, n: int, p: float) -> float:
+    """P(X <= k) for X ~ Binomial(n, p), summed exactly term by term."""
+    if not 0.0 <= p <= 1.0:
+        raise ValueError("p must be in [0, 1]")
+    if k < 0:
+        return 0.0
+    if k >= n:
+        return 1.0
+    return float(sum(math.comb(n, i) * p**i * (1.0 - p) ** (n - i) for i in range(k + 1)))
+
+
+def clopper_pearson_upper(k: int, n: int, level: float) -> float:
+    """One-sided Clopper–Pearson upper bound on a binomial rate after ``k`` events in ``n``.
+
+    The largest p for which seeing ``k`` or fewer events still has probability >= 1 - level,
+    i.e. the p with ``P(X <= k | n, p) = 1 - level`` (found by bisection; no scipy).
+    """
+    if not 0 <= k <= n:
+        raise ValueError("need 0 <= k <= n")
+    if not 0.0 < level < 1.0:
+        raise ValueError("level must be in (0, 1)")
+    if n == 0 or k == n:
+        return 1.0
+    alpha, lo, hi = 1.0 - level, k / n, 1.0
+    for _ in range(100):  # binomial_cdf falls as p rises
+        mid = (lo + hi) / 2.0
+        if binomial_cdf(k, n, mid) > alpha:
+            lo = mid
+        else:
+            hi = mid
+    return hi
+
+
+def top_confidence(probs: np.ndarray) -> np.ndarray:
+    """Confidence of the predicted (top) class per image."""
+    return np.asarray(probs, dtype=np.float64).max(axis=1)
+
+
+def budget_threshold(confidence: np.ndarray, budget: float) -> tuple[float, int]:
+    """Threshold routing the ``ceil(budget * n)`` least confident images (``conf < threshold``).
+
+    The threshold is the midpoint between the highest routed and the lowest accepted
+    confidence, so no image sits on it. Ties at that boundary are refused: the budget could
+    not be met exactly. Returns ``(threshold, n_routed)``.
+    """
+    conf = np.sort(np.asarray(confidence, dtype=np.float64))
+    n = len(conf)
+    if not 0.0 < budget < 1.0:
+        raise ValueError("budget must be in (0, 1)")
+    m = math.ceil(round(budget * n, 9))  # round: 0.05 * 180 must give 9, not 10
+    if not 0 < m < n:
+        raise ValueError(f"a budget of {budget} routes {m} of {n} images")
+    if conf[m - 1] == conf[m]:
+        raise ValueError("tied confidences at the budget boundary")
+    return float((conf[m - 1] + conf[m]) / 2.0), m
+
+
+def risk_coverage_curve(confidence: np.ndarray, correct: np.ndarray) -> dict[str, np.ndarray]:
+    """Coverage and risk for every threshold: accept the most confident images first.
+
+    Point j accepts every image with confidence >= ``threshold[j]`` (tied images together).
+    ``coverage`` = accepted / n; ``risk`` = errors among accepted / accepted.
+    """
+    conf = np.asarray(confidence, dtype=np.float64)
+    wrong = ~np.asarray(correct, dtype=bool)
+    order = np.argsort(-conf, kind="stable")
+    c, w = conf[order], wrong[order]
+    accepted = np.arange(1, len(c) + 1)
+    errors = np.cumsum(w)
+    last_of_tie = np.r_[c[1:] != c[:-1], True]
+    return {
+        "threshold": c[last_of_tie],
+        "coverage": accepted[last_of_tie] / len(c),
+        "risk": errors[last_of_tie] / accepted[last_of_tie],
+        "n_accepted": accepted[last_of_tie],
+        "n_errors_accepted": errors[last_of_tie],
+    }
+
+
+def risk_at_coverage(
+    confidence: np.ndarray, correct: np.ndarray, coverages: np.ndarray
+) -> np.ndarray:
+    """Risk when the ``ceil(c * n)`` most confident images are accepted, for each coverage c."""
+    conf = np.asarray(confidence, dtype=np.float64)
+    wrong = (~np.asarray(correct, dtype=bool))[np.argsort(-conf, kind="stable")]
+    n = len(conf)
+    k = np.clip(np.ceil(np.round(np.asarray(coverages) * n, 9)).astype(np.int64), 1, n)
+    return np.cumsum(wrong)[k - 1] / k
+
+
+def threshold_bootstrap(
+    confidence: np.ndarray, correct: np.ndarray, threshold: float, samples: Sequence[np.ndarray]
+) -> dict[str, np.ndarray]:
+    """Coverage and risk at a FIXED threshold for each bootstrap sample (nothing accepted:
+    risk 0)."""
+    conf = np.asarray(confidence, dtype=np.float64)
+    ok = np.asarray(correct, dtype=bool)
+    cov, risk = [], []
+    for idx in samples:
+        acc = conf[idx] >= threshold
+        n_acc = int(acc.sum())
+        cov.append(n_acc / len(idx))
+        risk.append(float((~ok[idx][acc]).sum() / n_acc) if n_acc else 0.0)
+    return {"coverage": np.asarray(cov), "risk": np.asarray(risk)}
+
+
+def risk_curve_bootstrap(
+    confidence: np.ndarray,
+    correct: np.ndarray,
+    coverages: np.ndarray,
+    samples: Sequence[np.ndarray],
+) -> np.ndarray:
+    """Risk at each coverage for each bootstrap sample: shape (n_samples, n_coverages)."""
+    conf = np.asarray(confidence, dtype=np.float64)
+    ok = np.asarray(correct, dtype=bool)
+    return np.asarray(
+        [risk_at_coverage(conf[idx], ok[idx], coverages) for idx in samples], dtype=np.float64
+    )

@@ -11,7 +11,8 @@ Before any test image is read, it checks that:
   - the ADR-022 comparison exists for this split, is not significant, and lists the models in
     the same order as ``compare_val.models`` with the pre-declared main model first;
   - each checkpoint is the one its results and the ADR-022 report were made with;
-  - each model has a calibration fitted on ``val`` of this split with this checkpoint.
+  - each model has a calibration fitted on ``val`` of this split with this checkpoint;
+  - the main model has a review threshold set on ``val`` with that calibration (ADR-023).
 
 Per model, in ``evaluate.out_dir/<name>/``: ``test_metrics.json`` (accuracy, macro-F1,
 per-class precision/recall/F1, confusion matrix, each metric with a bootstrap interval),
@@ -23,6 +24,12 @@ Calibration (TASK-012, ADR-006): the temperature T fitted on ``val`` by ``calibr
 read from ``<results_dir>/calibration.json`` and only APPLIED here (never fitted on test). The
 report adds ECE / NLL / Brier before and after T with bootstrap intervals and two reliability
 diagrams; the predictions CSV gets ``calibrated_confidence``. Predicted classes do not change.
+
+Review threshold (TASK-013, ADR-023), main model only: the threshold set on ``val`` by
+``threshold.py`` is read from ``<results_dir>/threshold.json`` and only APPLIED here. The report
+adds a ``review`` block (routed share, risk among accepted images with its Clopper-Pearson
+bound and bootstrap interval, test errors caught by review); the predictions CSV gets
+``routed_to_review``. Test results never change the threshold.
 
 ``--log-mlflow`` adds the test metrics, tags and allowlisted files to each model's existing
 MLflow run (from ``mlflow_run.json``); without it nothing talks to MLflow.
@@ -54,6 +61,7 @@ from src.training.compare_val import ModelSpec, load_checkpoint, specs_from_para
 from src.training.dataset import PROTECTED_SPLIT, SplitDataset
 from src.training.metrics import (
     bootstrap_metrics,
+    clopper_pearson_upper,
     compare_calibration,
     confusion_matrix,
     grouped_bootstrap_indices,
@@ -61,6 +69,8 @@ from src.training.metrics import (
     percentile_interval,
     reliability_bins,
     softmax,
+    threshold_bootstrap,
+    top_confidence,
 )
 from src.training.train import git_commit, sha256_file
 
@@ -148,6 +158,34 @@ def load_temperature(
     if cal.get("at_bound") is not False:
         raise EvalError(f"the temperature of {spec.name} sits on its range bound")
     return float(cal["temperature"]), path
+
+
+def load_threshold(
+    params: Mapping[str, Any], spec: ModelSpec, calibration: Path, root: Path = REPO_ROOT
+) -> tuple[float, Path]:
+    """Review threshold of the main model, set on val of this split with this checkpoint and
+    this calibration under the current rule (ADR-023)."""
+    rule = params["threshold"]
+    path = root / spec.results_dir / rule["out_file"]
+    if not path.is_file():
+        raise EvalError(f"no review threshold for {spec.name}: run `make threshold` first")
+    thr = json.loads(path.read_text(encoding="utf-8"))
+    fitted, split_csv = thr.get("fitted_on", {}), root / params["data"]["split_file"]
+    if fitted.get("split") != "val" or fitted.get("split_file") != split_csv.name:
+        raise EvalError(f"the threshold of {spec.name} was not set on val of this split")
+    if fitted.get("split_sha256") != sha256_file(split_csv):
+        raise EvalError(f"the split file changed after the threshold of {spec.name} was set")
+    if thr.get("checkpoint_sha256") != sha256_file(root / spec.checkpoint):
+        raise EvalError(f"the threshold of {spec.name} is for another checkpoint")
+    if thr.get("calibration_sha256") != sha256_file(calibration):
+        raise EvalError(f"the threshold of {spec.name} was set with another calibration")
+    stored = thr.get("rule", {})
+    for key in ("review_budget", "max_risk_ucb", "ucb_level"):
+        if stored.get(key) != rule[key]:
+            raise EvalError(f"threshold.{key} changed since the threshold was set")
+    if thr.get("passed") is not True:
+        raise EvalError(f"the threshold of {spec.name} did not pass its risk check")
+    return float(thr["threshold"]), path
 
 
 def check_split(params: Mapping[str, Any], root: Path = REPO_ROOT) -> None:
@@ -286,6 +324,53 @@ def calibration_report(
     }
 
 
+def review_report(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    confidence: np.ndarray,
+    threshold: float,
+    units: np.ndarray,
+    samples: Sequence[np.ndarray],
+    ucb_level: float,
+    level: float,
+) -> dict[str, Any]:
+    """Routing at a fixed threshold: who goes to review, and risk among the auto-accepted
+    images with a one-sided Clopper-Pearson bound and a grouped bootstrap interval (ADR-023)."""
+    correct = y_pred == y_true
+    accepted = confidence >= threshold
+    n, n_acc = len(y_true), int(accepted.sum())
+    k = int((~correct & accepted).sum())
+    boot = threshold_bootstrap(confidence, correct, threshold, samples)
+    cov_lo, cov_hi = percentile_interval(boot["coverage"], level)
+    risk_lo, risk_hi = percentile_interval(boot["risk"], level)
+    units_acc = np.unique(units[accepted])
+    units_err = np.unique(units[accepted & ~correct])
+    return {
+        "threshold": float(threshold),
+        "route_rule": "routed to review if calibrated confidence < threshold",
+        "n_images": int(n),
+        "n_routed": int(n - n_acc),
+        "n_accepted": n_acc,
+        "routed_share": float((n - n_acc) / n),
+        "coverage": _with_ci(n_acc / n, cov_lo, cov_hi),
+        "n_errors": int((~correct).sum()),
+        "errors_routed": int((~correct & ~accepted).sum()),
+        "errors_accepted": k,
+        "risk": _with_ci(k / n_acc if n_acc else 0.0, risk_lo, risk_hi),
+        "risk_ucb": {
+            "value": clopper_pearson_upper(k, n_acc, ucb_level),
+            "level": ucb_level,
+            "method": "one-sided Clopper-Pearson on images (assumes independent images)",
+        },
+        "risk_ucb_by_group": {
+            "value": clopper_pearson_upper(len(units_err), len(units_acc), ucb_level),
+            "n_units_accepted": int(len(units_acc)),
+            "n_units_with_error": int(len(units_err)),
+            "note": "each near-copy group counted once; sensitivity check, not the stop check",
+        },
+    }
+
+
 # ---------------------------------------------------------------- outputs
 
 
@@ -352,15 +437,19 @@ def write_predictions(
     probs: np.ndarray,
     calibrated: np.ndarray,
     classes: Sequence[str],
+    routed: np.ndarray | None = None,
 ) -> None:
-    """One row per image (file name only): raw and temperature-scaled top-class confidence."""
+    """One row per image (file name only): raw and temperature-scaled top-class confidence,
+    and ``routed_to_review`` (0/1) when a review threshold applies."""
     pred = probs.argmax(axis=1)
     rows = zip(paths, y_true, pred, probs.max(axis=1), calibrated.max(axis=1), strict=True)
+    header = ["path", "true", "pred", "confidence", "calibrated_confidence", "correct"]
     with path.open("w", encoding="utf-8", newline="\n") as f:
         w = csv.writer(f, lineterminator="\n")
-        w.writerow(["path", "true", "pred", "confidence", "calibrated_confidence", "correct"])
-        for p, t, y, conf, cal in rows:
-            w.writerow([p, classes[t], classes[y], f"{conf:.4f}", f"{cal:.4f}", int(t == y)])
+        w.writerow(header + (["routed_to_review"] if routed is not None else []))
+        for i, (p, t, y, conf, cal) in enumerate(rows):
+            row = [p, classes[t], classes[y], f"{conf:.4f}", f"{cal:.4f}", int(t == y)]
+            w.writerow(row + ([int(routed[i])] if routed is not None else []))
 
 
 def write_outputs(
@@ -371,6 +460,7 @@ def write_outputs(
     probs: np.ndarray,
     calibrated: np.ndarray,
     classes: Sequence[str],
+    routed: np.ndarray | None = None,
 ) -> dict[str, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     files = {
@@ -382,7 +472,7 @@ def write_outputs(
         "reliability_after": out_dir / "reliability_diagram_test_after.png",
     }
     files["metrics"].write_bytes((json.dumps(report, indent=2) + "\n").encode())
-    write_predictions(files["predictions"], paths, y_true, probs, calibrated, classes)
+    write_predictions(files["predictions"], paths, y_true, probs, calibrated, classes, routed)
     cal = report["calibration"]
     for when in ("before", "after"):
         label = "raw softmax" if when == "before" else f"T = {cal['temperature']:.3f}"
@@ -417,6 +507,17 @@ def mlflow_payload(report: Mapping[str, Any]) -> tuple[dict[str, float], dict[st
     for score in ("ece", "nll", "brier"):
         for when in ("before", "after", "change"):
             metrics[f"test_{score}_{when}"] = cal[when][score]["value"]
+    review = report.get("review")
+    if review is not None:
+        metrics["test_review_threshold"] = review["threshold"]
+        metrics["test_review_routed_share"] = review["routed_share"]
+        for name in ("coverage", "risk"):
+            metrics[f"test_review_{name}"] = review[name]["value"]
+            metrics[f"test_review_{name}_ci_low"] = review[name]["ci_low"]
+            metrics[f"test_review_{name}_ci_high"] = review[name]["ci_high"]
+        metrics["test_review_risk_ucb"] = review["risk_ucb"]["value"]
+        metrics["test_review_errors_routed"] = float(review["errors_routed"])
+        metrics["test_review_errors_accepted"] = float(review["errors_accepted"])
     prov, boot = report["provenance"], report["bootstrap"]
     tags = {
         "test_eval_split_file": report["split_file"],
@@ -425,6 +526,8 @@ def mlflow_payload(report: Mapping[str, Any]) -> tuple[dict[str, float], dict[st
         "test_eval_bootstrap": f"{boot['method']}; n={boot['n_resamples']}",
         "test_eval_decision_record": "ADR-022",
     }
+    if review is not None:
+        tags["test_eval_threshold_record"] = "ADR-023"
     return metrics, tags
 
 
@@ -457,6 +560,8 @@ def run(params: Mapping[str, Any], *, log_mlflow: bool = False) -> list[dict[str
     check_split(params)
     specs = check_model_choice(params)
     temperatures = [load_temperature(params, spec) for spec in specs]
+    threshold, thr_path = load_threshold(params, specs[0], temperatures[0][1])  # main only
+    ucb_level = float(params["threshold"]["ucb_level"])
     cfg = EvalConfig.from_params(params)
     split_csv, raw_dir = Path(params["data"]["split_file"]), Path(params["data"]["raw_dir"])
     pre_cfg = PreprocessConfig.from_params(params)
@@ -525,8 +630,22 @@ def run(params: Mapping[str, Any], *, log_mlflow: bool = False) -> list[dict[str
                 "timm": timm.__version__,
             },
         }
+        routed = None
+        if role == ROLES[0]:  # the review threshold exists for the main model only (ADR-023)
+            conf = top_confidence(calibrated)
+            routed = conf < threshold
+            review = review_report(
+                y_true, probs.argmax(axis=1), conf, threshold, units, samples, ucb_level, cfg.level
+            )
+            report["review"] = {
+                "source": thr_path.relative_to(REPO_ROOT).as_posix(),
+                "decision_record": "ADR-023",
+                "applied_only": "threshold set on val (threshold.py); nothing is set on test",
+                **review,
+            }
+            report["provenance"] = report.pop("provenance")  # keep provenance last
         files = write_outputs(
-            cfg.out_dir / spec.name, report, ds.paths, y_true, probs, calibrated, classes
+            cfg.out_dir / spec.name, report, ds.paths, y_true, probs, calibrated, classes, routed
         )
         summary = {"model": spec.name, "role": role, "out_dir": (cfg.out_dir / spec.name)}
         if log_mlflow:
@@ -566,6 +685,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(
                 f"    {score}: before {_fmt(cal['before'][score])} -> after "
                 f"{_fmt(cal['after'][score])}; {cal['verdict'][score]}"
+            )
+        if "review" in r:
+            rv = r["review"]
+            print(
+                f"  review (threshold {rv['threshold']:.4f} from val, applied only): routed "
+                f"{rv['n_routed']}/{rv['n_images']} ({rv['routed_share']:.1%}); errors routed "
+                f"{rv['errors_routed']}/{rv['n_errors']}; risk among accepted "
+                f"{_fmt(rv['risk'])}, {rv['risk_ucb']['level']:.0%} upper bound "
+                f"{rv['risk_ucb']['value']:.4f}"
             )
         print(f"  wrote {s['out_dir'].as_posix()}/")
         if "mlflow_run" in s:

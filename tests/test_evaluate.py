@@ -153,6 +153,19 @@ def fake_setup(root: Path, *, significant=False, order=("m1", "m2")) -> dict:
             },
         }
         (res / "calibration.json").write_text(json.dumps(cal), encoding="utf-8")
+        if name == "m1":  # the review threshold exists for the main model only
+            rule = {
+                k: PARAMS["threshold"][k] for k in ("review_budget", "max_risk_ucb", "ucb_level")
+            }
+            thr = {
+                "threshold": 0.9,
+                "passed": True,
+                "rule": rule,
+                "checkpoint_sha256": _sha(ckpt),
+                "calibration_sha256": _sha(res / "calibration.json"),
+                "fitted_on": cal["fitted_on"],
+            }
+            (res / "threshold.json").write_text(json.dumps(thr), encoding="utf-8")
         models.append({"name": name, "checkpoint": f"{name}.pt", "results_dir": f"res_{name}"})
     for name in order:
         report_models.append({"name": name, "checkpoint_sha256": _sha(root / f"{name}.pt")})
@@ -267,6 +280,49 @@ def test_load_temperature_refuses_without_calibration(tmp_path):
         ev.load_temperature(params, _spec(tmp_path), tmp_path)
 
 
+def test_load_threshold_accepts_a_matching_threshold(tmp_path):
+    params = fake_setup(tmp_path)
+    cal = tmp_path / "res_m1" / ev.CALIBRATION_FILE
+    t, path = ev.load_threshold(params, _spec(tmp_path), cal, tmp_path)
+    assert t == 0.9 and path.name == "threshold.json"
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"checkpoint_sha256": "0" * 64}, "another checkpoint"),
+        ({"calibration_sha256": "0" * 64}, "another calibration"),
+        ({"passed": False}, "risk check"),
+        ({"rule": {"review_budget": 0.2, "max_risk_ucb": 0.05, "ucb_level": 0.95}}, "changed"),
+        ({"fitted_on": {"split": "test_frozen", "split_file": "split.csv"}}, "not set on val"),
+    ],
+)
+def test_load_threshold_refuses_a_mismatched_threshold(tmp_path, change, message):
+    params = fake_setup(tmp_path)
+    path = tmp_path / "res_m1" / "threshold.json"
+    thr = {**json.loads(path.read_text(encoding="utf-8")), **change}
+    path.write_text(json.dumps(thr), encoding="utf-8")
+    with pytest.raises(ev.EvalError, match=message):
+        ev.load_threshold(
+            params, _spec(tmp_path), tmp_path / "res_m1" / "calibration.json", tmp_path
+        )
+
+
+def test_load_threshold_refuses_a_recalibrated_model(tmp_path):
+    params = fake_setup(tmp_path)
+    cal = tmp_path / "res_m1" / ev.CALIBRATION_FILE
+    cal.write_text(cal.read_text(encoding="utf-8") + " ", encoding="utf-8")
+    with pytest.raises(ev.EvalError, match="another calibration"):
+        ev.load_threshold(params, _spec(tmp_path), cal, tmp_path)
+
+
+def test_load_threshold_refuses_without_threshold(tmp_path):
+    params = fake_setup(tmp_path)
+    (tmp_path / "res_m1" / "threshold.json").unlink()
+    with pytest.raises(ev.EvalError, match="make threshold"):
+        ev.load_threshold(params, _spec(tmp_path), tmp_path / "res_m1" / "x", tmp_path)
+
+
 def test_calibration_report_keeps_classes_and_counts_errors():
     y = np.array([0, 1, 2, 0])
     logits = np.eye(3)[[0, 1, 1, 0]] * 4.0  # one error
@@ -284,9 +340,11 @@ def test_committed_state_passes_the_checks_and_main_model_is_first():
     assert cfg["models"][0]["name"] == PARAMS["train"]["model"]
     report = json.loads((REPO_ROOT / cfg["out"]).read_text(encoding="utf-8"))
     assert report["significant"] is False
-    for spec in ev.specs_from_params(cfg):
+    for i, spec in enumerate(ev.specs_from_params(cfg)):
         if (REPO_ROOT / spec.checkpoint).exists():
-            ev.load_temperature(PARAMS, spec)
+            _, cal_path = ev.load_temperature(PARAMS, spec)
+            if i == 0:
+                ev.load_threshold(PARAMS, spec, cal_path)
 
 
 # ---------------------------------------------------------------- outputs + MLflow
@@ -309,6 +367,19 @@ def fake_report(name="m1") -> tuple[dict, np.ndarray, np.ndarray]:
         **ev.metrics_report(y, probs.argmax(axis=1), CLASSES, samples, 0.95),
         "bootstrap": {"method": "cluster", "n_resamples": 50},
         "calibration": calibration,
+        "review": {
+            "source": "res/threshold.json",
+            **ev.review_report(
+                y,
+                probs.argmax(axis=1),
+                probs.max(axis=1),
+                0.85,
+                np.arange(len(y)),
+                samples,
+                0.95,
+                0.95,
+            ),
+        },
         "provenance": {"git_commit": "abc"},
     }
     return report, y, probs
@@ -327,6 +398,11 @@ def test_write_outputs_and_plot_names_are_allowlisted(tmp_path):
     assert lines[0] == "path,true,pred,confidence,calibrated_confidence,correct"
     assert lines[1] == "img_0.jpg,a,b,0.8000,0.5000,0"
     assert b"\r\n" not in files["metrics"].read_bytes()
+    routed = probs.max(axis=1) < 0.85
+    files = ev.write_outputs(tmp_path, report, paths, y, probs, probs, CLASSES, routed)
+    lines = files["predictions"].read_text(encoding="utf-8").splitlines()
+    assert lines[0].endswith(",correct,routed_to_review")
+    assert lines[1] == "img_0.jpg,a,b,0.8000,0.8000,0,1"
 
 
 def test_mlflow_payload_names():
@@ -336,6 +412,11 @@ def test_mlflow_payload_names():
     assert all(isinstance(v, float) for v in metrics.values())
     assert tags["test_eval_role"] == "main"
     assert {"test_temperature_applied", "test_ece_before", "test_nll_after"} <= set(metrics)
+    assert {"test_review_threshold", "test_review_risk_ucb", "test_review_coverage"} <= set(metrics)
+    assert tags["test_eval_threshold_record"] == "ADR-023"
+    report.pop("review")
+    metrics, tags = ev.mlflow_payload(report)
+    assert "test_review_threshold" not in metrics and "test_eval_threshold_record" not in tags
 
 
 def test_log_to_mlflow_adds_to_the_finished_run_locally(tmp_path):
@@ -417,7 +498,20 @@ def test_committed_results_are_consistent(index):
     assert c["reliability_before"]["n_bins"] == PARAMS["calibrate"]["n_bins"]
     rows = REPO_ROOT / PARAMS["evaluate"]["out_dir"] / spec["name"] / "test_predictions.csv"
     lines = rows.read_text(encoding="utf-8").splitlines()
-    assert lines[0] == "path,true,pred,confidence,calibrated_confidence,correct"
+    header = "path,true,pred,confidence,calibrated_confidence,correct"
+    if index == 0:  # main model: the val threshold is applied (ADR-023)
+        thr = json.loads(
+            (REPO_ROOT / spec["results_dir"] / "threshold.json").read_text(encoding="utf-8")
+        )
+        rv = r["review"]
+        assert rv["threshold"] == thr["threshold"]
+        assert rv["source"] == f"{spec['results_dir']}/threshold.json"
+        assert rv["n_errors"] == r["n_errors"] == rv["errors_routed"] + rv["errors_accepted"]
+        assert rv["n_routed"] == sum(line.endswith(",1") for line in lines[1:])
+        assert lines[0] == header + ",routed_to_review"
+    else:
+        assert "review" not in r
+        assert lines[0] == header
 
 
 @pytest.mark.needs_data
@@ -432,7 +526,7 @@ def test_run_reproduces_committed_results(tmp_path, monkeypatch):
     for s in ev.run(params):
         new, old = s["report"], _committed(s["model"])
         keys = ("accuracy", "macro_f1", "per_class", "confusion_matrix", "bootstrap", "calibration")
-        for key in keys:
+        for key in keys + (("review",) if s["role"] == "main" else ()):
             assert new[key] == old[key], key
         name = "test_predictions.csv"
         committed_csv = REPO_ROOT / PARAMS["evaluate"]["out_dir"] / s["model"] / name

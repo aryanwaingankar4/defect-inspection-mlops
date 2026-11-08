@@ -16,7 +16,7 @@ RAW_DIR := data/raw
 PARAMS := configs/params.yaml
 
 .PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
-	compare-val calibrate evaluate register kaggle-dataset kaggle-push kaggle-status kaggle-output
+	compare-val calibrate threshold evaluate register kaggle-dataset kaggle-push kaggle-status kaggle-output
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -82,6 +82,9 @@ compare-val: ## Paired McNemar test of the two v2 models on val (CPU inference; 
 
 calibrate: ## Temperature scaling on val for both models (CPU; ADR-006). ARGS: --log-mlflow
 	$(RUN_TRAIN) $(ENV_FILE) python -m src.training.calibrate --config $(PARAMS) $(ARGS)
+
+threshold: ## Review threshold on val for the main model (CPU; ADR-023). ARGS: --log-mlflow
+	$(RUN_TRAIN) $(ENV_FILE) python -m src.training.threshold --config $(PARAMS) $(ARGS)
 
 evaluate: ## Both models on test_frozen -> results/eval/ (CPU; after compare-val, ADR-022). ARGS: --log-mlflow
 	$(RUN_TRAIN) $(ENV_FILE) python -m src.training.evaluate --config $(PARAMS) $(ARGS)

@@ -166,6 +166,13 @@ def fake_setup(root: Path, *, significant=False, order=("m1", "m2")) -> dict:
                 "fitted_on": cal["fitted_on"],
             }
             (res / "threshold.json").write_text(json.dumps(thr), encoding="utf-8")
+            ood = {
+                "ood_energy_threshold": -5.0,
+                "rule": {"id_flag_budget": PARAMS["ood"]["id_flag_budget"]},
+                "calibration_sha256": _sha(res / "calibration.json"),
+                "fitted_on": cal["fitted_on"],
+            }
+            (res / "ood.json").write_text(json.dumps(ood), encoding="utf-8")
         models.append({"name": name, "checkpoint": f"{name}.pt", "results_dir": f"res_{name}"})
     for name in order:
         report_models.append({"name": name, "checkpoint_sha256": _sha(root / f"{name}.pt")})
@@ -323,6 +330,30 @@ def test_load_threshold_refuses_without_threshold(tmp_path):
         ev.load_threshold(params, _spec(tmp_path), tmp_path / "res_m1" / "x", tmp_path)
 
 
+def test_load_ood_threshold_accepts_and_refuses(tmp_path):
+    params = fake_setup(tmp_path)
+    cal = tmp_path / "res_m1" / ev.CALIBRATION_FILE
+    t, path = ev.load_ood_threshold(params, _spec(tmp_path), cal, tmp_path)
+    assert t == -5.0 and path.name == "ood.json"
+    params["ood"] = {**params["ood"], "id_flag_budget": 0.5}
+    with pytest.raises(ev.EvalError, match="id_flag_budget changed"):
+        ev.load_ood_threshold(params, _spec(tmp_path), cal, tmp_path)
+    (tmp_path / "res_m1" / "ood.json").unlink()
+    with pytest.raises(ev.EvalError, match="make ood"):
+        ev.load_ood_threshold(params, _spec(tmp_path), cal, tmp_path)
+
+
+def test_ood_report_counts_false_alarms_and_either_reason():
+    y = np.array([0, 0, 1, 1, 1])
+    pred = np.array([0, 1, 1, 1, 0])  # errors at 1 and 4
+    low = np.array([False, True, False, False, False])
+    ood = np.array([False, True, True, False, False])
+    r = ev.ood_report(y, pred, low, ood, 0.95)
+    assert (r["flagged_ood"], r["routed_ood_only"], r["routed_any_reason"]) == (2, 1, 2)
+    assert (r["errors_routed_any_reason"], r["n_accepted"], r["errors_accepted"]) == (1, 3, 1)
+    assert r["false_alarm_share"] == 0.4
+
+
 def test_calibration_report_keeps_classes_and_counts_errors():
     y = np.array([0, 1, 2, 0])
     logits = np.eye(3)[[0, 1, 1, 0]] * 4.0  # one error
@@ -345,6 +376,7 @@ def test_committed_state_passes_the_checks_and_main_model_is_first():
             _, cal_path = ev.load_temperature(PARAMS, spec)
             if i == 0:
                 ev.load_threshold(PARAMS, spec, cal_path)
+                ev.load_ood_threshold(PARAMS, spec, cal_path)
 
 
 # ---------------------------------------------------------------- outputs + MLflow
@@ -398,11 +430,13 @@ def test_write_outputs_and_plot_names_are_allowlisted(tmp_path):
     assert lines[0] == "path,true,pred,confidence,calibrated_confidence,correct"
     assert lines[1] == "img_0.jpg,a,b,0.8000,0.5000,0"
     assert b"\r\n" not in files["metrics"].read_bytes()
-    routed = probs.max(axis=1) < 0.85
-    files = ev.write_outputs(tmp_path, report, paths, y, probs, probs, CLASSES, routed)
+    low = probs.max(axis=1) < 0.85
+    ood = np.zeros(len(y), dtype=bool)
+    extra = {"low_confidence": low, "ood_flag": ood, "routed_to_review": low | ood}
+    files = ev.write_outputs(tmp_path, report, paths, y, probs, probs, CLASSES, extra)
     lines = files["predictions"].read_text(encoding="utf-8").splitlines()
-    assert lines[0].endswith(",correct,routed_to_review")
-    assert lines[1] == "img_0.jpg,a,b,0.8000,0.8000,0,1"
+    assert lines[0].endswith(",correct,low_confidence,ood_flag,routed_to_review")
+    assert lines[1] == "img_0.jpg,a,b,0.8000,0.8000,0,1,0,1"
 
 
 def test_mlflow_payload_names():
@@ -507,8 +541,15 @@ def test_committed_results_are_consistent(index):
         assert rv["threshold"] == thr["threshold"]
         assert rv["source"] == f"{spec['results_dir']}/threshold.json"
         assert rv["n_errors"] == r["n_errors"] == rv["errors_routed"] + rv["errors_accepted"]
-        assert rv["n_routed"] == sum(line.endswith(",1") for line in lines[1:])
-        assert lines[0] == header + ",routed_to_review"
+        cols = lines[0].split(",")
+        rows = [dict(zip(cols, line.split(","), strict=True)) for line in lines[1:]]
+        assert rv["n_routed"] == sum(row["low_confidence"] == "1" for row in rows)
+        assert lines[0] == header + ",low_confidence,ood_flag,routed_to_review"
+        o = r["ood"]
+        ood = json.loads((REPO_ROOT / spec["results_dir"] / "ood.json").read_text(encoding="utf-8"))
+        assert o["ood_energy_threshold"] == ood["ood_energy_threshold"]
+        assert o["flagged_ood"] == sum(row["ood_flag"] == "1" for row in rows)
+        assert o["routed_any_reason"] == sum(row["routed_to_review"] == "1" for row in rows)
     else:
         assert "review" not in r
         assert lines[0] == header
@@ -526,7 +567,7 @@ def test_run_reproduces_committed_results(tmp_path, monkeypatch):
     for s in ev.run(params):
         new, old = s["report"], _committed(s["model"])
         keys = ("accuracy", "macro_f1", "per_class", "confusion_matrix", "bootstrap", "calibration")
-        for key in keys + (("review",) if s["role"] == "main" else ()):
+        for key in keys + (("review", "ood") if s["role"] == "main" else ()):
             assert new[key] == old[key], key
         name = "test_predictions.csv"
         committed_csv = REPO_ROOT / PARAMS["evaluate"]["out_dir"] / s["model"] / name

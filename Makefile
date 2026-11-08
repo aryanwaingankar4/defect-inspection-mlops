@@ -16,7 +16,7 @@ RAW_DIR := data/raw
 PARAMS := configs/params.yaml
 
 .PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
-	compare-val calibrate threshold evaluate champion export-onnx quantize register kaggle-dataset kaggle-push kaggle-status kaggle-output
+	compare-val calibrate threshold ood evaluate champion export-onnx quantize register kaggle-dataset kaggle-push kaggle-status kaggle-output
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -85,6 +85,9 @@ calibrate: ## Temperature scaling on val for both models (CPU; ADR-006). ARGS: -
 
 threshold: ## Review threshold on val for the main model (CPU; ADR-023). ARGS: --log-mlflow
 	$(RUN_TRAIN) $(ENV_FILE) python -m src.training.threshold --config $(PARAMS) $(ARGS)
+
+ood: ## Energy OOD threshold on val + synthetic non-steel evaluation (ADR-027). ARGS: --log-mlflow
+	$(RUN_TRAIN) $(ENV_FILE) python -m src.training.ood --config $(PARAMS) $(ARGS)
 
 evaluate: ## Both models on test_frozen -> results/eval/ (CPU; after compare-val, ADR-022). ARGS: --log-mlflow
 	$(RUN_TRAIN) $(ENV_FILE) python -m src.training.evaluate --config $(PARAMS) $(ARGS)

@@ -413,3 +413,40 @@ def risk_curve_bootstrap(
     return np.asarray(
         [risk_at_coverage(conf[idx], ok[idx], coverages) for idx in samples], dtype=np.float64
     )
+
+
+# ---------------------------------------------------------------- OOD detection (TASK-017)
+
+
+def auroc(negatives: np.ndarray, positives: np.ndarray) -> float:
+    """P(score of a positive > score of a negative), ties counted half (Mann-Whitney U)."""
+    neg, pos = np.asarray(negatives, np.float64), np.asarray(positives, np.float64)
+    if not len(neg) or not len(pos):
+        raise ValueError("need at least one negative and one positive")
+    both = np.concatenate([neg, pos])
+    order = np.argsort(both, kind="mergesort")
+    ranks = np.empty(len(both), dtype=np.float64)
+    sorted_vals = both[order]
+    i = 0
+    while i < len(both):  # average ranks over ties
+        j = i
+        while j + 1 < len(both) and sorted_vals[j + 1] == sorted_vals[i]:
+            j += 1
+        ranks[order[i : j + 1]] = (i + j) / 2.0 + 1.0
+        i = j + 1
+    u = ranks[len(neg) :].sum() - len(pos) * (len(pos) + 1) / 2.0
+    return float(u / (len(neg) * len(pos)))
+
+
+def fpr_at_tpr(negatives: np.ndarray, positives: np.ndarray, tpr: float) -> float:
+    """Share of negatives flagged when the threshold flags ``tpr`` of the positives
+    (flag = score >= t, with t the largest value that still flags at least ``tpr``)."""
+    pos = np.sort(np.asarray(positives, np.float64))[::-1]
+    k = math.ceil(round(tpr * len(pos), 9))
+    t = pos[k - 1]
+    return float((np.asarray(negatives, np.float64) >= t).mean())
+
+
+def clopper_pearson_lower(k: int, n: int, level: float) -> float:
+    """One-sided lower bound on a binomial rate after ``k`` events in ``n``."""
+    return 0.0 if k == 0 else 1.0 - clopper_pearson_upper(n - k, n, level)

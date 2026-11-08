@@ -89,6 +89,21 @@ threshold:                         # src/training/threshold.py: review threshold
     level: 0.95
   out_file: threshold.json         # in the main model's results_dir, with risk_coverage.png
 
+ood:                               # src/training/ood.py (TASK-017, ADR-027): energy OOD score on the serving model
+  id_flag_budget: 0.02             # flag the ceil(budget * n) highest-energy val images (no labels): 4 of 180
+  batch_size: 32
+  detection_level: 0.95            # one-sided Clopper-Pearson lower bound on the flagged share
+  fpr_at_tpr: 0.95                 # report the val false-positive rate at this synthetic detection rate
+  bootstrap:                       # interval of the threshold (grouped, as evaluate)
+    n_resamples: 2000
+    seed: 19
+    level: 0.95
+  synthetic:                       # src/data/synthetic_ood.py: generated in code, evaluation only
+    seed: 23
+    n_per_family: 50
+    families: [gaussian_noise, uniform_noise, gradient, stripes, checkerboard, shapes, blobs, near_flat]
+  out_file: ood.json               # in the main model's results_dir, with ood_score_histogram.png
+
 evaluate:                          # src/training/evaluate.py on test_frozen (TASK-011); reports only, never selects
   # Models: compare_val.models (same order; main model first). Groups: near_duplicates_cnn.pairs_file at confirm_pixel_corr.
   batch_size: 32                   # CPU inference only

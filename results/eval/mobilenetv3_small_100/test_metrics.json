@@ -374,7 +374,7 @@
     "caution": "Only 5 of 360 images are misclassified, so NLL and ECE rest mostly on those few images; treat small changes as uncertain."
   },
   "provenance": {
-    "git_commit": "e5e3337a2a67d6ee257aa837f466f0939d3eac35",
+    "git_commit": "ed5a4ae837ce830eaea596161f19f5bcf707340d",
     "git_dirty": false,
     "checkpoint_sha256": "334ff9581d0c12990740aabe6cbdb11f993f146d18b0e84c348f2e2af321834b",
     "train_run_uid": "ce5dad6d2fdd432ba7f8654940bb7f65",

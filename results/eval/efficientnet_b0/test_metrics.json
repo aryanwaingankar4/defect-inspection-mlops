@@ -408,8 +408,28 @@
       "note": "each near-copy group counted once; sensitivity check, not the stop check"
     }
   },
+  "ood": {
+    "source": "results/train/ood.json",
+    "decision_record": "ADR-027",
+    "ood_energy_threshold": -6.1445646940236704,
+    "applied_only": "threshold set on val ONNX logits (ood.py); applied here to PyTorch logits, equal within the ADR-025 parity tolerance; nothing is set on test",
+    "n_images": 360,
+    "flagged_ood": 3,
+    "false_alarm_share": 0.008333333333333333,
+    "false_alarm_ucb": 0.02139610500451078,
+    "routed_low_confidence": 8,
+    "routed_ood_only": 2,
+    "routed_any_reason": 10,
+    "routed_share": 0.027777777777777776,
+    "n_errors": 3,
+    "errors_routed_any_reason": 1,
+    "n_accepted": 350,
+    "errors_accepted": 2,
+    "risk_ucb": 0.017877909894280345,
+    "ucb_level": 0.95
+  },
   "provenance": {
-    "git_commit": "e5e3337a2a67d6ee257aa837f466f0939d3eac35",
+    "git_commit": "ed5a4ae837ce830eaea596161f19f5bcf707340d",
     "git_dirty": false,
     "checkpoint_sha256": "108b03706b708404d7a013fa36a21ea51cced4c2f9321f097cc2c5147a8de1dd",
     "train_run_uid": "85cc41e56aa54bd280f616fe8a87a441",

@@ -587,6 +587,7 @@ serve = [
     { name = "onnxruntime" },
     { name = "prometheus-client" },
     { name = "python-multipart" },
+    { name = "sqlalchemy" },
     { name = "uvicorn" },
 ]
 train = [
@@ -622,6 +623,7 @@ serve = [
     { name = "onnxruntime", specifier = ">=1.31.1" },
     { name = "prometheus-client", specifier = ">=0.26.0" },
     { name = "python-multipart", specifier = ">=0.0.33" },
+    { name = "sqlalchemy", specifier = ">=2.1.8" },
     { name = "uvicorn", specifier = ">=0.54.0" },
 ]
 train = [

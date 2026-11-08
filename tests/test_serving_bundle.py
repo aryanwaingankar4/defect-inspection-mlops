@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from mlflow import MlflowClient  # noqa: E402
 
 from src.config import load_params  # noqa: E402
+from src.db.store import PredictionLog  # noqa: E402
 from src.serving import app as api  # noqa: E402
 from src.serving import bundle as bd  # noqa: E402
 from src.tracking import serving_bundle as sb  # noqa: E402
@@ -25,6 +26,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PARAMS = load_params(REPO_ROOT / "configs" / "params.yaml")
 NAME = PARAMS["tracking"]["registered_model"]
 ALIAS = PARAMS["promotion"]["champion_alias"]
+
+
+@pytest.fixture(autouse=True)
+def database_url(tmp_path, monkeypatch):
+    """A fresh SQLite prediction log per test (ADR-029); tests never read .env."""
+    url = "sqlite:///" + (tmp_path / "db" / "predictions.db").as_posix()
+    monkeypatch.setenv("DATABASE_URL", url)
+    return url
 
 
 @pytest.fixture
@@ -142,7 +151,7 @@ def test_no_champion(client, params):
 
 @pytest.mark.needs_data
 @pytest.mark.needs_model
-def test_real_bundle_reproduces_committed_val_results():
+def test_real_bundle_reproduces_committed_val_results(database_url):
     """The API on the real bundle gives the classes, calibrated confidences and routing counts
     recorded offline on val (calibrate's CSV from PyTorch; ood.json from the same ONNX file)."""
     bundle_dir = REPO_ROOT / PARAMS["serving"]["bundle_dir"]
@@ -177,6 +186,7 @@ def test_real_bundle_reproduces_committed_val_results():
             low += "low_confidence" in body["reasons"]
             flagged += "ood" in body["reasons"]
             routed += body["routed_to_review"]
+    assert PredictionLog(database_url).count() == len(rows)  # one row per prediction
     v = ood["val"]
     assert (low, flagged, routed) == (
         v["routed_low_confidence"],

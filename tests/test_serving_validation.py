@@ -26,20 +26,21 @@ def rejected(data: bytes, cfg=CFG) -> va.InputRejected:
 
 
 def test_good_image_decodes_to_grayscale():
-    img = va.decode_checked(sh.image_bytes(100.0), CFG)
-    assert img.mode == "L" and img.size == (200, 200)
+    d = va.decode_checked(sh.image_bytes(100.0), CFG)
+    assert d.image.mode == "L" and d.image.size == (200, 200)
+    assert (d.format, d.width, d.height) == ("PNG", 200, 200)
 
 
 def test_rgb_image_is_converted_by_the_shared_loader():
     buf = io.BytesIO()
     rgb = np.random.default_rng(0).integers(0, 255, (64, 64, 3), dtype=np.uint8)
     Image.fromarray(rgb).save(buf, format="PNG")
-    assert va.decode_checked(buf.getvalue(), CFG).mode == "L"
+    assert va.decode_checked(buf.getvalue(), CFG).image.mode == "L"
 
 
 def test_format_is_decided_by_the_bytes_not_the_name():
     jpeg = sh.image_bytes(100.0, fmt="JPEG")
-    assert va.decode_checked(jpeg, CFG).mode == "L"
+    assert va.decode_checked(jpeg, CFG).format == "JPEG"
     e = rejected(sh.image_bytes(100.0, fmt="WEBP"))
     assert (e.status, e.code) == (415, "unsupported_format")
 

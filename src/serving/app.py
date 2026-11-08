@@ -8,7 +8,8 @@ threshold from its tags. Uses the shared ``preprocess.py`` and ``scoring.py`` on
 
 Security: ``/predict`` and ``/feedback`` need the ``X-API-Key`` header (env ``API_KEY``,
 compared in constant time). Logs are JSON lines with ``request_id`` and the image SHA-256;
-never image bytes, file names or the key. Database logging comes in TASK-019.
+never image bytes, file names or the key. Each served prediction is written to the prediction
+log (``DATABASE_URL``, ADR-029) before it is returned; if the write fails, ``/predict`` returns 503.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -40,11 +42,13 @@ from prometheus_client import (
 from pydantic import BaseModel, Field
 
 from src.config import load_params
+from src.db.store import DatabaseConfigError, PredictionLog, database_url_from_env
 from src.serving import json_logging
 from src.serving.bundle import Bundle, load_bundle
+from src.serving.features import image_features
 from src.serving.preprocess import to_model_input
 from src.serving.scoring import score
-from src.serving.validation import InputRejected, ValidationConfig, decode_checked
+from src.serving.validation import Decoded, InputRejected, ValidationConfig, decode_checked
 
 API_KEY_ENV = "API_KEY"
 API_KEY_HEADER = "X-API-Key"
@@ -144,6 +148,11 @@ class Metrics:
             buckets=(-30, -25, -20, -15, -12, -10, -8, -6, -4, -2, 0),
             registry=r,
         )
+        self.db_failures = Counter(
+            "defect_api_db_write_failures_total",
+            "Predictions not served because the log write failed (ADR-029)",
+            registry=r,
+        )
         self.model_info = Gauge(
             "defect_api_model_info",
             "Model being served (value 1)",
@@ -171,20 +180,62 @@ def endpoint_label(path: str) -> str:
     return path if path in KNOWN_PATHS else "other"
 
 
-def predict_one(bundle: Bundle, image: Any) -> tuple[dict[str, Any], float]:
-    """Shared preprocessing -> ONNX raw logits -> shared scoring. Returns result and seconds."""
+def predict_one(bundle: Bundle, image: Any) -> tuple[dict[str, Any], float, list[float]]:
+    """Shared preprocessing -> ONNX raw logits -> shared scoring.
+
+    Returns the result, the inference time in seconds and the raw logits."""
     x = to_model_input(image, bundle.preprocess)[np.newaxis]
     t0 = time.perf_counter()
     logits = bundle.model.logits(x)
     seconds = time.perf_counter() - t0
     s = score(logits, bundle.thresholds)
+    return (
+        {
+            "prediction": bundle.classes[int(s.pred[0])],
+            "calibrated_confidence": float(s.confidence[0]),
+            "energy": float(s.energy[0]),
+            "routed_to_review": bool(s.routed[0]),
+            "reasons": s.reasons(0),
+        },
+        seconds,
+        [float(v) for v in logits[0]],
+    )
+
+
+def log_row(
+    request_id: str,
+    sha: str,
+    n_bytes: int,
+    decoded: Decoded,
+    result: Mapping[str, Any],
+    logits: list[float],
+    info: Mapping[str, str],
+    latency_ms: float,
+    inference_ms: float,
+) -> dict[str, Any]:
+    """The prediction-log row (ADR-029): hashes, results and summary features, never bytes."""
     return {
-        "prediction": bundle.classes[int(s.pred[0])],
-        "calibrated_confidence": float(s.confidence[0]),
-        "energy": float(s.energy[0]),
-        "routed_to_review": bool(s.routed[0]),
-        "reasons": s.reasons(0),
-    }, seconds
+        "request_id": request_id,
+        "created_at": datetime.now(UTC),
+        "image_sha256": sha,
+        "prediction": result["prediction"],
+        "calibrated_confidence": result["calibrated_confidence"],
+        "energy": result["energy"],
+        "routed_to_review": result["routed_to_review"],
+        "reason_low_confidence": "low_confidence" in result["reasons"],
+        "reason_ood": "ood" in result["reasons"],
+        "model_name": info["name"],
+        "model_version": info["version"],
+        "model_precision": info["precision"],
+        "latency_ms": latency_ms,
+        "inference_ms": inference_ms,
+        "image_bytes": n_bytes,
+        "image_width": decoded.width,
+        "image_height": decoded.height,
+        "image_format": decoded.format,
+        **image_features(decoded.image),
+        "logits": logits,
+    }
 
 
 # ---------------------------------------------------------------- app
@@ -195,11 +246,17 @@ def create_app(
     *,
     api_key: str | None = None,
     bundle_dir: Path | str | None = None,
+    database_url: str | None = None,
 ) -> FastAPI:
-    """Build the app. Refuses to start without an API key; the bundle loads at startup."""
+    """Build the app. Refuses to start without an API key or a database URL; the bundle and the
+    prediction log open at startup."""
     api_key = api_key if api_key is not None else os.environ.get(API_KEY_ENV, "")
     if not api_key.strip():
         raise RuntimeError(f"{API_KEY_ENV} is not set: the API refuses to start without it")
+    try:
+        db_url = database_url or database_url_from_env()
+    except DatabaseConfigError as exc:
+        raise RuntimeError(f"{exc}: the API refuses to start without it (ADR-029)") from exc
     vcfg = ValidationConfig.from_params(params)
     bundle_path = Path(bundle_dir or params["serving"]["bundle_dir"])
     metrics = Metrics()
@@ -208,12 +265,15 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         bundle = load_bundle(bundle_path, params["preprocess"])  # raises: the API does not start
-        app.state.bundle = bundle
+        db = PredictionLog(db_url)
+        db.create_tables()  # raises if the database is unreachable: the API does not start
+        app.state.bundle, app.state.db = bundle, db
         info = bundle.model_info
         metrics.model_info.labels(info["name"], info["version"], info["precision"]).set(1)
         log.info("startup", extra={"fields": {"model": info, "bundle_dir": str(bundle_path)}})
         yield
-        app.state.bundle = None
+        app.state.bundle = app.state.db = None
+        db.dispose()
 
     app = FastAPI(
         title="Steel defect inspection API",
@@ -222,7 +282,7 @@ def create_app(
         "routing. Reviewer and drift are simulated in this project.",
         lifespan=lifespan,
     )
-    app.state.bundle = None
+    app.state.bundle = app.state.db = None
     app.state.metrics = metrics
 
     @app.middleware("http")
@@ -308,15 +368,18 @@ def create_app(
 
     @app.get("/health")
     def health(request: Request) -> JSONResponse:
-        bundle = request.app.state.bundle
-        if bundle is None:
+        bundle, db = request.app.state.bundle, request.app.state.db
+        if bundle is None or db is None:
             return JSONResponse({"status": "not_ready"}, status_code=503)
+        db_ok = db.ping()
         return JSONResponse(
             {
-                "status": "ok",
+                "status": "ok" if db_ok else "degraded",
                 "model": bundle.model_info,
                 "bundle_built_at": bundle.manifest["built_at"],
-            }
+                "database": "ok" if db_ok else "unavailable",
+            },
+            status_code=200 if db_ok else 503,
         )
 
     @app.get("/metrics")
@@ -331,8 +394,8 @@ def create_app(
         request.state.log["image_bytes"] = len(data)
         if data:
             request.state.log["image_sha256"] = hashlib.sha256(data).hexdigest()
-        image = decode_checked(data, vcfg)
-        result, seconds = predict_one(bundle, image)
+        decoded = decode_checked(data, vcfg)
+        result, seconds, logits = predict_one(bundle, decoded.image)
         metrics.inference.observe(seconds)
         metrics.predictions.labels(result["prediction"]).inc()
         metrics.confidence.observe(result["calibrated_confidence"])
@@ -343,6 +406,28 @@ def create_app(
             metrics.routed_reason.labels(reason).inc()
         info = bundle.model_info
         request.state.log.update({**result, "model_version": info["version"]})
+        sha = request.state.log["image_sha256"]
+        latency_ms = round((time.perf_counter() - start) * 1000, 3)
+        row = log_row(
+            request.state.request_id,
+            sha,
+            len(data),
+            decoded,
+            result,
+            logits,
+            info,
+            latency_ms,
+            round(seconds * 1000, 3),
+        )
+        try:
+            request.app.state.db.add(row)
+        except Exception as exc:  # noqa: BLE001 - fail closed (ADR-029)
+            metrics.db_failures.inc()
+            log.error("log_write_failed", extra={"fields": {"exc_type": type(exc).__name__}})
+            raise ApiError(
+                503, "log_unavailable", "the prediction could not be logged; retry later"
+            ) from exc
+        request.state.log["logged"] = True
         th = bundle.thresholds
         return PredictResponse(
             request_id=request.state.request_id,
@@ -354,8 +439,8 @@ def create_app(
                 review=th.review_threshold,
                 ood_energy=th.ood_energy_threshold,
             ),
-            image_sha256=request.state.log["image_sha256"],
-            latency_ms=round((time.perf_counter() - start) * 1000, 3),
+            image_sha256=sha,
+            latency_ms=latency_ms,
         )
 
     @app.post("/feedback", status_code=202, response_model=FeedbackResponse)
@@ -367,7 +452,7 @@ def create_app(
         return FeedbackResponse(
             request_id=body.request_id,
             stored=False,
-            detail="stub: feedback is validated but not stored until TASK-019/TASK-026",
+            detail="stub: feedback is validated but not stored until TASK-026",
         )
 
     return app

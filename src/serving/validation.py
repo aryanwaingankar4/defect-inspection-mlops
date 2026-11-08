@@ -56,7 +56,17 @@ def check_size(n_bytes: int, cfg: ValidationConfig) -> None:
         )
 
 
-def check_header(data: bytes, cfg: ValidationConfig) -> None:
+@dataclass(frozen=True)
+class Decoded:
+    """A checked upload: the grayscale image and facts from its header (no bytes kept)."""
+
+    image: Image.Image
+    format: str
+    width: int
+    height: int
+
+
+def check_header(data: bytes, cfg: ValidationConfig) -> tuple[str, int, int]:
     """Format and dimensions from the header only (no pixel decoding)."""
     try:
         with warnings.catch_warnings():
@@ -79,20 +89,21 @@ def check_header(data: bytes, cfg: ValidationConfig) -> None:
         )
     if min(w, h) < cfg.min_side:
         raise InputRejected(422, "too_small", f"each side must be at least {cfg.min_side} pixels")
+    return fmt, w, h
 
 
 def is_near_blank(image: Image.Image, cfg: ValidationConfig) -> bool:
     return float(np.asarray(image, dtype=np.float64).std()) < cfg.near_blank_max_std
 
 
-def decode_checked(data: bytes, cfg: ValidationConfig) -> Image.Image:
-    """Run every check and return the grayscale image from the shared ``load_image``."""
+def decode_checked(data: bytes, cfg: ValidationConfig) -> Decoded:
+    """Run every check; the image comes from the shared ``load_image`` (grayscale)."""
     check_size(len(data), cfg)
-    check_header(data, cfg)
+    fmt, width, height = check_header(data, cfg)
     try:
         image = load_image(data)
     except PreprocessError as exc:
         raise InputRejected(422, "undecodable", "the file is not a decodable image") from exc
     if is_near_blank(image, cfg):
         raise InputRejected(422, "near_blank", "the image is nearly blank (almost no contrast)")
-    return image
+    return Decoded(image=image, format=fmt, width=width, height=height)

@@ -17,9 +17,11 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from src.config import load_params  # noqa: E402
+from src.db.store import PredictionLog  # noqa: E402
 from src.serving import app as api  # noqa: E402
 from src.serving import bundle as bd  # noqa: E402
 from src.serving import scoring  # noqa: E402
+from src.serving.features import image_features  # noqa: E402
 from src.serving.json_logging import JsonFormatter  # noqa: E402
 from src.serving.onnx_model import OnnxClassifier  # noqa: E402
 from src.serving.preprocess import PreprocessConfig, load_image, to_model_input  # noqa: E402
@@ -35,6 +37,14 @@ def params_with(**serving) -> dict:
     p = copy.deepcopy(PARAMS)
     p["serving"].update(serving)
     return p
+
+
+@pytest.fixture(autouse=True)
+def database_url(tmp_path, monkeypatch):
+    """A fresh SQLite prediction log per test (ADR-029); tests never read .env."""
+    url = "sqlite:///" + (tmp_path / "db" / "predictions.db").as_posix()
+    monkeypatch.setenv("DATABASE_URL", url)
+    return url
 
 
 @pytest.fixture
@@ -326,3 +336,88 @@ def test_serving_code_imports_no_torch_or_mlflow():
         roots = {n.split(".")[0] for n in names}
         assert not roots & {"torch", "timm", "mlflow", "torchvision"}, path.name
         assert not {n for n in names if n.startswith("src.training")}, path.name
+
+
+# ---------------------------------------------------------------- prediction log (TASK-019)
+
+
+def test_refuses_to_start_without_a_database_url(bundle_dir, monkeypatch):
+    monkeypatch.delenv("DATABASE_URL")
+    with pytest.raises(RuntimeError, match="DATABASE_URL"):
+        api.create_app(PARAMS, api_key=KEY, bundle_dir=bundle_dir)
+
+
+def test_unreachable_database_stops_startup(bundle_dir, tmp_path):
+    app = api.create_app(
+        PARAMS, api_key=KEY, bundle_dir=bundle_dir, database_url="sqlite:///" + tmp_path.as_posix()
+    )  # a folder, not a file: SQLite cannot open it
+    with pytest.raises(Exception, match="unable to open"), TestClient(app):
+        pass
+
+
+def test_predict_writes_one_row_without_image_bytes(client, bundle_dir, database_url):
+    data = sh.image_bytes(DARK)
+    body = post_image(client, data, name="secret-name.png").json()
+    rows = PredictionLog(database_url).recent(5)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["request_id"] == body["request_id"]
+    assert row["image_sha256"] == hashlib.sha256(data).hexdigest() == body["image_sha256"]
+    for key in ("prediction", "routed_to_review", "model_version"):
+        assert row[key] == body[key], key
+    assert row["calibrated_confidence"] == pytest.approx(body["calibrated_confidence"])
+    assert row["energy"] == pytest.approx(body["energy"])
+    assert (row["reason_low_confidence"], row["reason_ood"]) == (False, False)
+    assert (row["model_name"], row["model_precision"]) == ("steel-defect-classifier", "fp32")
+    assert (row["image_format"], row["image_width"], row["image_height"]) == ("PNG", 200, 200)
+    assert row["image_bytes"] == len(data)
+    assert row["created_at"].tzinfo is not None
+    assert row["inference_ms"] >= 0 and row["latency_ms"] >= row["inference_ms"]
+    feats = image_features(load_image(data))
+    for key, value in feats.items():
+        assert row[key] == pytest.approx(value), key
+    np.testing.assert_allclose(row["logits"], logits_for(bundle_dir, data)[0], rtol=1e-6)
+    stored = repr(row)
+    assert "secret-name" not in stored and KEY not in stored
+    assert not any(isinstance(v, bytes | bytearray | memoryview) for v in row.values())
+
+
+def test_routed_image_row_has_both_reasons(client, database_url):
+    post_image(client, sh.image_bytes(MID))
+    row = PredictionLog(database_url).recent(1)[0]
+    assert row["routed_to_review"] and row["reason_low_confidence"] and row["reason_ood"]
+
+
+def test_rejected_and_unauthorised_requests_write_no_row(client, database_url):
+    post_image(client, b"junk")
+    post_image(client, sh.image_bytes(128.0, std=0.0))
+    post_image(client, sh.image_bytes(DARK), key=None)
+    post_image(client, sh.image_bytes(DARK), key="wrong")
+    assert PredictionLog(database_url).count() == 0
+
+
+def test_log_write_failure_fails_closed(client, database_url, monkeypatch):
+    def broken(row):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(client.app.state.db, "add", broken)
+    r = post_image(client, sh.image_bytes(DARK))
+    assert_error(r, 503, "log_unavailable")
+    assert "prediction" not in r.json() and "disk full" not in r.text
+    assert "defect_api_db_write_failures_total 1.0" in client.get("/metrics").text
+    assert PredictionLog(database_url).count() == 0
+
+
+def test_health_reports_the_database(client, monkeypatch):
+    assert client.get("/health").json()["database"] == "ok"
+    monkeypatch.setattr(client.app.state.db, "ping", lambda: False)
+    r = client.get("/health")
+    assert r.status_code == 503
+    assert r.json()["status"] == "degraded" and r.json()["database"] == "unavailable"
+
+
+def test_rows_accumulate_across_requests(client, database_url):
+    for i in range(3):
+        post_image(client, sh.image_bytes(DARK, seed=i))
+    rows = PredictionLog(database_url).recent(10)
+    assert len(rows) == 3 and len({r["request_id"] for r in rows}) == 3

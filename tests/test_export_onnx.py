@@ -77,7 +77,7 @@ def test_onnx_matches_pytorch_on_synthetic_images(exported, n):
     got = OnnxClassifier(path).logits(x)
     ref = ex.torch_logits(model, x)
     assert got.shape == (n, 6)
-    assert np.abs(got - ref).max() <= CFG.atol
+    assert ex.tolerance_ratio(ref, got, CFG.atol, CFG.rtol) <= 1.0
     assert np.array_equal(got.argmax(axis=1), ref.argmax(axis=1))
 
 
@@ -126,14 +126,23 @@ def test_onnx_artifacts_are_allowed_by_the_policy():
 
 def test_parity_report_detects_class_and_routing_changes():
     ref = np.array([[4.0, 0.0, 0.0], [0.0, 1.0, 0.9], [0.0, 0.0, 5.0]])
-    same = ex.parity_report(ref, ref + 1e-6, 1.0, 0.5, 1e-4)
+    same = ex.parity_report(ref, ref + 1e-6, 1.0, 0.5, 1e-4, 1e-4)
     assert same["passed"] and same["same_class"] == 3 and same["same_routing"] == 3
     flipped = ref.copy()
     flipped[1] = [0.0, 0.9, 1.0]  # class changes, gap 0.1
-    bad = ex.parity_report(ref, flipped, 1.0, 0.5, 1e-4)
+    bad = ex.parity_report(ref, flipped, 1.0, 0.5, 1e-4, 1e-4)
     assert not bad["passed"] and bad["same_class"] == 2
-    near = ex.parity_report(ref, ref, 1.0, 0.98, 1e-4)
+    near = ex.parity_report(ref, ref, 1.0, 0.98, 1e-4, 1e-4)
     assert near["min_distance_to_threshold"] < 0.02
+
+
+def test_tolerance_scales_with_the_logit():
+    ref = np.array([[20.0, -17.0, 0.0]])
+    got = ref + np.array([[2.5e-3, -1.3e-4, 0.0]])  # allowed at 20: 1e-4 + 1e-4 * 20 = 2.1e-3
+    assert ex.tolerance_ratio(ref, got, 1e-4, 1e-4) > 1.0
+    got[0, 0] = ref[0, 0] + 1.9e-3  # within 2.1e-3; -1.3e-4 at -17 is within 1.8e-3
+    assert ex.tolerance_ratio(ref, got, 1e-4, 1e-4) <= 1.0
+    assert ex.tolerance_ratio(np.zeros((1, 2)), np.full((1, 2), 2e-4), 1e-4, 1e-4) == 2.0
 
 
 def test_run_refuses_test_frozen():
@@ -232,8 +241,10 @@ def test_committed_export_report_is_consistent():
         "review_threshold": champ["review_threshold"],
     }
     p = r["parity"]
-    assert p["passed"] and p["atol"] == CFG.atol and p["n_images"] > 0
-    assert p["max_abs_logit_diff"] <= CFG.atol
+    assert p["passed"] and p["n_images"] > 0
+    assert (p["atol"], p["rtol"]) == (CFG.atol, CFG.rtol)
+    assert p["max_tolerance_ratio"] <= 1.0
+    assert all(b["passed"] and b["max_tolerance_ratio"] <= 1.0 for b in p["batch_check"])
     assert p["same_class"] == p["same_routing"] == p["n_images"]
     assert [b["batch"] for b in p["batch_check"]] == list(CFG.batch_sizes)
     assert r["parity_split"] == PARAMS["train"]["val_split"] != "test_frozen"

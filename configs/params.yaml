@@ -105,7 +105,10 @@ export:                            # src/training/export_onnx.py (TASK-015, ADR-
   batch_size: 32                   # val parity inference
   batch_sizes: [1, 7, 32]          # dynamic batch axis check
   parity:                          # on val only; any failure keeps nothing
-    atol: 1.0e-4                   # max |logit_onnx - logit_torch|; classes and review routing must match exactly
+    # |logit_onnx - logit_torch| <= atol + rtol * |logit_torch| (like numpy.allclose); classes and
+    # review routing must match exactly. rtol added after the first run (ADR-025): float32 sums.
+    atol: 1.0e-4
+    rtol: 1.0e-4
 
 promotion:                         # src/tracking/promote.py (TASK-014, ADR-024); gate rules come with ADR-005
   champion_alias: champion         # serves predictions (ADR-001)

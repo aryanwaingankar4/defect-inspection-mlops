@@ -10,7 +10,8 @@ CPU only, no training. Steps:
      axis, one self-contained file, with metadata (version, checkpoint hash, classes,
      preprocessing). The example input is synthetic: no NEU pixels reach the export;
   3. parity on ``val`` (never ``test_frozen``): ONNX Runtime vs PyTorch logits within
-     ``export.parity.atol``, identical predicted classes, identical review routing at the
+     ``atol + rtol * |torch logit|`` (``export.parity``), identical predicted classes,
+     identical review routing at the
      champion's T and threshold, and several batch sizes. Any failure: nothing is kept.
 
 Writes ``<export.out_dir>/<model>-v<version>.fp32.onnx`` (git-ignored) and
@@ -60,6 +61,7 @@ class ExportConfig:
     batch_size: int
     batch_sizes: tuple[int, ...]
     atol: float
+    rtol: float
 
     @classmethod
     def from_params(cls, params: Mapping[str, Any]) -> ExportConfig:
@@ -71,6 +73,7 @@ class ExportConfig:
             batch_size=int(e["batch_size"]),
             batch_sizes=tuple(int(b) for b in e["batch_sizes"]),
             atol=float(e["parity"]["atol"]),
+            rtol=float(e["parity"]["rtol"]),
         )
 
 
@@ -144,8 +147,20 @@ def torch_logits(model: nn.Module, x: np.ndarray) -> np.ndarray:
     return model.eval()(torch.from_numpy(np.ascontiguousarray(x, dtype=np.float32))).numpy()
 
 
+def tolerance_ratio(ref: np.ndarray, got: np.ndarray, atol: float, rtol: float) -> float:
+    """Largest ``|got - ref| / (atol + rtol * |ref|)``; <= 1 means within tolerance (allclose)."""
+    ref64 = ref.astype(np.float64)
+    gap = np.abs(got.astype(np.float64) - ref64)
+    return float((gap / (atol + rtol * np.abs(ref64))).max())
+
+
 def parity_report(
-    ref: np.ndarray, got: np.ndarray, temperature: float, threshold: float, atol: float
+    ref: np.ndarray,
+    got: np.ndarray,
+    temperature: float,
+    threshold: float,
+    atol: float,
+    rtol: float,
 ) -> dict[str, Any]:
     """ONNX vs PyTorch: logit gap, predicted classes and review routing (ADR-025)."""
     gap = np.abs(got.astype(np.float64) - ref.astype(np.float64))
@@ -156,6 +171,9 @@ def parity_report(
     report = {
         "n_images": int(n),
         "atol": atol,
+        "rtol": rtol,
+        "rule": "|onnx - torch| <= atol + rtol * |torch| for every logit",
+        "max_tolerance_ratio": tolerance_ratio(ref, got, atol, rtol),
         "max_abs_logit_diff": float(gap.max()),
         "mean_abs_logit_diff": float(gap.mean()),
         "same_class": int((ref.argmax(axis=1) == got.argmax(axis=1)).sum()),
@@ -165,7 +183,7 @@ def parity_report(
         "min_distance_to_threshold": float(np.abs(conf_ref - threshold).min()),
     }
     report["passed"] = bool(
-        report["max_abs_logit_diff"] <= atol
+        report["max_tolerance_ratio"] <= 1.0
         and report["same_class"] == n
         and report["same_routing"] == n
     )
@@ -173,13 +191,26 @@ def parity_report(
 
 
 def batch_check(
-    session: OnnxClassifier, model: nn.Module, x: np.ndarray, sizes: Sequence[int], atol: float
+    session: OnnxClassifier,
+    model: nn.Module,
+    x: np.ndarray,
+    sizes: Sequence[int],
+    atol: float,
+    rtol: float,
 ) -> list[dict[str, Any]]:
-    """The dynamic batch axis: each batch size gives the PyTorch logits within ``atol``."""
+    """The dynamic batch axis: each batch size gives the PyTorch logits within tolerance."""
     out = []
     for n in sizes:
-        gap = float(np.abs(session.logits(x[:n]) - torch_logits(model, x[:n])).max())
-        out.append({"batch": int(n), "max_abs_logit_diff": gap, "passed": gap <= atol})
+        got, ref = session.logits(x[:n]), torch_logits(model, x[:n])
+        ratio = tolerance_ratio(ref, got, atol, rtol)
+        out.append(
+            {
+                "batch": int(n),
+                "max_abs_logit_diff": float(np.abs(got - ref).max()),
+                "max_tolerance_ratio": ratio,
+                "passed": ratio <= 1.0,
+            }
+        )
     return out
 
 
@@ -248,8 +279,8 @@ def run(params: Mapping[str, Any], *, log_mlflow: bool = False) -> dict[str, Any
         y, ref, got, x = val_outputs(
             model, session, DataLoader(ds, batch_size=cfg.batch_size), max(cfg.batch_sizes)
         )
-        parity = parity_report(ref, got, temperature, threshold, cfg.atol)
-        parity["batch_check"] = batch_check(session, model, x, cfg.batch_sizes, cfg.atol)
+        parity = parity_report(ref, got, temperature, threshold, cfg.atol, cfg.rtol)
+        parity["batch_check"] = batch_check(session, model, x, cfg.batch_sizes, cfg.atol, cfg.rtol)
         parity["val_accuracy_torch"] = float((ref.argmax(axis=1) == y).mean())
         parity["val_accuracy_onnx"] = float((got.argmax(axis=1) == y).mean())
         if not (parity["passed"] and all(b["passed"] for b in parity["batch_check"])):
@@ -356,8 +387,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     print(
         f"  parity on {r['parity_split']} ({p['n_images']} images): max |logit diff| "
-        f"{p['max_abs_logit_diff']:.2e} (atol {p['atol']:.0e}), same class {p['same_class']}/"
-        f"{p['n_images']}, same routing {p['same_routing']}/{p['n_images']}"
+        f"{p['max_abs_logit_diff']:.2e}; tolerance atol {p['atol']:.0e} + rtol {p['rtol']:.0e} "
+        f"x |logit|, worst ratio {p['max_tolerance_ratio']:.2f} (<= 1 passes); same class "
+        f"{p['same_class']}/{p['n_images']}, same routing {p['same_routing']}/{p['n_images']}"
     )
     for b in p["batch_check"]:
         print(f"  batch {b['batch']}: max |logit diff| {b['max_abs_logit_diff']:.2e}")

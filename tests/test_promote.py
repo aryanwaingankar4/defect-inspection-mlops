@@ -21,6 +21,11 @@ NAME = "steel-defect-classifier-test"
 ALIAS = "champion"
 
 
+@pytest.fixture
+def client(offline_mlflow: str) -> MlflowClient:
+    return MlflowClient(tracking_uri=offline_mlflow)
+
+
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -29,9 +34,8 @@ def _ci(v: float) -> dict:
     return {"value": v, "ci_low": v - 0.01, "ci_high": min(1.0, v + 0.01)}
 
 
-def make_run(tmp_path: Path, tag: str = "a") -> dict:
+def make_run(client: MlflowClient, tmp_path: Path, tag: str = "a") -> dict:
     """A finished run with the three evidence files, registered as a new version."""
-    client = MlflowClient()
     exp = client.get_experiment_by_name("promote-test")
     exp_id = exp.experiment_id if exp else client.create_experiment("promote-test")
     run = client.create_run(
@@ -81,18 +85,16 @@ def make_run(tmp_path: Path, tag: str = "a") -> dict:
 # ---------------------------------------------------------------- registry
 
 
-def test_plan_is_a_dry_run(tmp_path):
-    ev = make_run(tmp_path)
-    p = pr.plan(MlflowClient(), NAME, ALIAS, ev)
+def test_plan_is_a_dry_run(client, tmp_path):
+    ev = make_run(client, tmp_path)
+    p = pr.plan(client, NAME, ALIAS, ev)
     assert p["action"] == "set" and p["version"] == ev["version"]
-    client = MlflowClient()
     assert client.get_registered_model(NAME).aliases == {}
     assert client.get_model_version(NAME, ev["version"]).tags == {}
 
 
-def test_apply_writes_evidence_then_alias_and_is_idempotent(tmp_path):
-    ev = make_run(tmp_path)
-    client = MlflowClient()
+def test_apply_writes_evidence_then_alias_and_is_idempotent(client, tmp_path):
+    ev = make_run(client, tmp_path)
     tags = pr.version_tags(ev)
     desc = pr.version_description(ev, "https://github.com/o/r")
     pr.apply(client, NAME, ALIAS, ev["version"], tags, desc)
@@ -103,18 +105,18 @@ def test_apply_writes_evidence_then_alias_and_is_idempotent(tmp_path):
     assert pr.plan(client, NAME, ALIAS, ev)["action"] == "none"
 
 
-def test_plan_refuses_when_another_version_holds_the_alias(tmp_path):
-    first = make_run(tmp_path, "a")
-    second = make_run(tmp_path, "b")
-    MlflowClient().set_registered_model_alias(NAME, ALIAS, first["version"])
+def test_plan_refuses_when_another_version_holds_the_alias(client, tmp_path):
+    first = make_run(client, tmp_path, "a")
+    second = make_run(client, tmp_path, "b")
+    client.set_registered_model_alias(NAME, ALIAS, first["version"])
     with pytest.raises(pr.PromotionError, match="promotion gate"):
-        pr.plan(MlflowClient(), NAME, ALIAS, second)
+        pr.plan(client, NAME, ALIAS, second)
 
 
-def test_find_version_refuses_a_run_without_a_version(tmp_path):
-    make_run(tmp_path)
+def test_find_version_refuses_a_run_without_a_version(client, tmp_path):
+    make_run(client, tmp_path)
     with pytest.raises(pr.PromotionError, match="found 0"):
-        pr.find_version(MlflowClient(), NAME, "0" * 32)
+        pr.find_version(client, NAME, "0" * 32)
 
 
 @pytest.mark.parametrize(
@@ -124,21 +126,21 @@ def test_find_version_refuses_a_run_without_a_version(tmp_path):
         ({"train_run_uid": "other"}, "another training run"),
     ],
 )
-def test_check_run_refuses_another_run(tmp_path, change, message):
-    ev = {**make_run(tmp_path), **change}
+def test_check_run_refuses_another_run(client, tmp_path, change, message):
+    ev = {**make_run(client, tmp_path), **change}
     with pytest.raises(pr.PromotionError, match=message):
-        pr.check_run(MlflowClient(), ev)
+        pr.check_run(client, ev)
 
 
-def test_check_run_refuses_changed_evidence(tmp_path):
-    ev = make_run(tmp_path)
+def test_check_run_refuses_changed_evidence(client, tmp_path):
+    ev = make_run(client, tmp_path)
     ev["sha256"] = {**ev["sha256"], "threshold": "0" * 64}
     with pytest.raises(pr.PromotionError, match="differs from the local file"):
-        pr.check_run(MlflowClient(), ev)
+        pr.check_run(client, ev)
 
 
-def test_run_dry_run_then_apply(tmp_path, monkeypatch):
-    ev = make_run(tmp_path)
+def test_run_dry_run_then_apply(client, tmp_path, monkeypatch):
+    ev = make_run(client, tmp_path)
     params = copy.deepcopy(PARAMS)
     params["tracking"]["registered_model"] = NAME
     log = tmp_path / "promotion_log.json"
@@ -147,10 +149,10 @@ def test_run_dry_run_then_apply(tmp_path, monkeypatch):
 
     out = pr.run(params)
     assert out["action"] == "set" and not log.exists()
-    assert MlflowClient().get_registered_model(NAME).aliases == {}
+    assert client.get_registered_model(NAME).aliases == {}
 
     out = pr.run(params, do_apply=True)
-    aliases = MlflowClient().get_registered_model(NAME).aliases
+    aliases = client.get_registered_model(NAME).aliases
     assert {k: str(v) for k, v in aliases.items()} == {ALIAS: ev["version"]}
     entries = json.loads(log.read_text(encoding="utf-8"))
     assert len(entries) == 1 and entries[0]["version"] == ev["version"]
@@ -197,8 +199,8 @@ def test_check_test_report_refuses_mismatches(path, value, message):
         pr.check_test_report(report, **kwargs)
 
 
-def test_tags_keep_full_precision_and_description_links_pin_the_commit(tmp_path):
-    ev = make_run(tmp_path)
+def test_tags_keep_full_precision_and_description_links_pin_the_commit(client, tmp_path):
+    ev = make_run(client, tmp_path)
     tags = pr.version_tags(ev)
     assert float(tags["temperature"]) == ev["temperature"]
     assert float(tags["review_threshold"]) == ev["threshold"]

@@ -98,6 +98,12 @@ evaluate:                          # src/training/evaluate.py on test_frozen (TA
     level: 0.95                    # two-sided percentile interval
   out_dir: results/eval            # results/eval/<model>/: test_metrics.json, test_predictions.csv, 2 plots
 
+promotion:                         # src/tracking/promote.py (TASK-014, ADR-024); gate rules come with ADR-005
+  champion_alias: champion         # serves predictions (ADR-001)
+  challenger_alias: challenger     # candidate under the promotion gate (Phase 3)
+  log_file: results/promotion_log.json   # every applied decision, appended
+  code_url: https://github.com/aryanwaingankar4/defect-inspection-mlops  # evidence links in the registry
+
 tracking:                          # MLflow (ADR-018), used on the laptop only (ADR-020). Server from env MLFLOW_TRACKING_URI, else local_uri
   experiment: neu-training
   registered_model: steel-defect-classifier

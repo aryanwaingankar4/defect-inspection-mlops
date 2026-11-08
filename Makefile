@@ -4,6 +4,8 @@
 RUN := uv run --locked
 # Training deps (torch, timm, matplotlib) live in the `train` group.
 RUN_TRAIN := uv run --locked --group train
+# The API needs only the serve group (ONNX Runtime, FastAPI; no torch, no mlflow).
+RUN_SERVE := uv run --locked --group serve
 # Publishing to MLflow loads secrets (DagsHub) from .env if it exists. Training and tests never do.
 ENV_FILE := $(if $(wildcard .env),--env-file .env,)
 
@@ -16,7 +18,7 @@ RAW_DIR := data/raw
 PARAMS := configs/params.yaml
 
 .PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
-	compare-val calibrate threshold ood evaluate champion export-onnx quantize register kaggle-dataset kaggle-push kaggle-status kaggle-output
+	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve register kaggle-dataset kaggle-push kaggle-status kaggle-output
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -36,10 +38,10 @@ format: ## Auto-fix lint issues and format code
 	$(RUN) ruff format .
 
 test: ## Fast tests (skips slow, manual, needs_data, needs_model)
-	$(RUN_TRAIN) pytest -m "$(FAST_TESTS)"
+	$(RUN_TRAIN) --group serve pytest -m "$(FAST_TESTS)"
 
 test-all: ## All tests, including slow / manual / needs_data / needs_model
-	$(RUN_TRAIN) pytest
+	$(RUN_TRAIN) --group serve pytest
 
 check: lint test ## Lint + fast tests (what CI runs)
 
@@ -97,6 +99,12 @@ export-onnx: ## FP32 ONNX of @champion + parity on val (CPU; ADR-025). ARGS: --l
 
 quantize: ## Static INT8 QDQ of the champion ONNX + FP32 vs INT8 on val (ADR-026). ARGS: --log-mlflow
 	$(RUN_TRAIN) $(ENV_FILE) python -m src.training.quantize --config $(PARAMS) $(ARGS)
+
+serving-bundle: ## Download the @champion serving ONNX + tags into models/serving/ (read-only; ADR-028)
+	$(RUN_TRAIN) $(ENV_FILE) python -m src.tracking.serving_bundle --config $(PARAMS)
+
+serve: ## Run the API on http://127.0.0.1:8000 from models/serving/ (API_KEY from .env; ADR-028)
+	$(RUN_SERVE) $(ENV_FILE) python -m src.serving.app --config $(PARAMS) $(ARGS)
 
 champion: ## Set the first @champion with linked evidence (ADR-024). Dry run; ARGS=--apply writes
 	$(RUN_TRAIN) $(ENV_FILE) python -m src.tracking.promote --config $(PARAMS) $(ARGS)

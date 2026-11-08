@@ -13,6 +13,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "dvc>=3.67.1",
+    "httpx>=0.28.1",
     "imagehash>=4.3.2",
     "kaggle>=2.2.5",
     "pytest>=9.2.0",
@@ -30,7 +31,11 @@ train = [
     "torchvision>=0.29.2",
 ]
 serve = [
+    "fastapi>=0.162.0",
     "onnxruntime>=1.31.1",
+    "prometheus-client>=0.26.0",
+    "python-multipart>=0.0.33",
+    "uvicorn>=0.54.0",
 ]
 ui = []
 

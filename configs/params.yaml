@@ -148,6 +148,15 @@ promotion:                         # src/tracking/promote.py (TASK-014, ADR-024)
   log_file: results/promotion_log.json   # every applied decision, appended
   code_url: https://github.com/aryanwaingankar4/defect-inspection-mlops  # evidence links in the registry
 
+serving:                           # src/serving/app.py (TASK-018, ADR-028); no registry access at runtime
+  bundle_dir: models/serving       # git-ignored: <model>-v<version>.<precision>.onnx + manifest.json (`make serving-bundle`)
+  max_upload_bytes: 2097152        # 2 MiB per image (413 above); NEU images are far smaller
+  allowed_formats: [JPEG, PNG, BMP]  # format decoded from the bytes (415 otherwise), not the client's content type
+  min_side: 32                     # pixels (422 below)
+  max_pixels: 16777216             # 4096 x 4096, checked from the header before decoding (422 above)
+  near_blank_max_std: 2.0          # greyscale pixel std below this -> 422 near_blank; set well below every
+                                   # NEU train_v1/val image (checked by tests/test_serving_validation.py)
+
 tracking:                          # MLflow (ADR-018), used on the laptop only (ADR-020). Server from env MLFLOW_TRACKING_URI, else local_uri
   experiment: neu-training
   registered_model: steel-defect-classifier

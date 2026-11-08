@@ -1,0 +1,33 @@
+[
+  {
+    "time_utc": "2026-11-08T14:27:22+00:00",
+    "decision": "initial_champion",
+    "decision_record": "ADR-024",
+    "registered_model": "steel-defect-classifier",
+    "alias": "champion",
+    "version": "2",
+    "previous_version": null,
+    "gate": "not applied: no previous champion to compare with (ADR-024)",
+    "run_id": "6895c4fd4cae49c384e019d85eaee471",
+    "model": "efficientnet_b0",
+    "checkpoint_sha256": "108b03706b708404d7a013fa36a21ea51cced4c2f9321f097cc2c5147a8de1dd",
+    "split_file": "neu_split_v2.csv",
+    "temperature": 1.6424862981226587,
+    "review_threshold": 0.8160653375842147,
+    "evidence": {
+      "calibration": {
+        "file": "results/train/calibration.json",
+        "sha256": "7edd68bc65ccfaf1af1951ec5f915092f708564b6fb8d9adf40596a171576b3e"
+      },
+      "threshold": {
+        "file": "results/train/threshold.json",
+        "sha256": "02a561c388b7ce0f1b838876a856234d3aa2f5bc73d36d0f86489301ad1232ac"
+      },
+      "test_metrics": {
+        "file": "results/eval/efficientnet_b0/test_metrics.json",
+        "sha256": "604939f009e7c67fd3daf94aed254cdbc67b36771b6b7fc09229eb796e44692a"
+      }
+    },
+    "results_commit": "ab2e7b15c9462009ebaba6c5e7a8552068d1c625"
+  }
+]

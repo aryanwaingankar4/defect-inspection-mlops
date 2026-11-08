@@ -211,3 +211,14 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
 - **Reason:** The first champion is a starting point, not a promotion; comparing it with nothing would be a fake gate. Tying the alias to hashed evidence makes it clear later what exactly was put into service.
 - **Consequences:** Version 1 (leaky split, ADR-021) never holds an alias. The first real ADR-005 decision is the first retrained challenger in Phase 3.
 - **Result (`make champion ARGS=--apply`, 2026-11-08):** all checks passed; `@champion` now points to `steel-defect-classifier` version 2 (MLflow run `6895c4fd…`), whose tags hold `temperature`, `review_threshold` and the SHA-256 of the three evidence files, with links pinned to the results commit. The decision is the first entry of `results/promotion_log.json`. Version 1 holds no alias.
+
+## ADR-025 — ONNX outputs raw logits; temperature and review threshold are applied in serving
+- **Context:** TASK-015 exports the `@champion` model to ONNX for serving with ONNX Runtime (no PyTorch in the serving image). The earlier plan said "ONNX export with temperature applied". Since ADR-024 the `@champion` version carries `temperature` and `review_threshold` as tags, tied by hash to the files they came from.
+- **Decision:**
+  - The ONNX graph has one input `input` `[batch, 3, H, W]` (preprocessed by the shared `src/serving/preprocess.py`, dynamic batch axis) and one output `logits` `[batch, n_classes]`: raw logits, no softmax, no temperature.
+  - Serving computes `softmax(logits / T)` and routes to review if the top calibrated confidence is below the threshold, reading `T` and the threshold from the tags of the `@champion` version it loads (ADR-024).
+  - The model is found through the registry alias; the local checkpoint is used only if its SHA-256 equals the version's `checkpoint_sha256` tag. The export uses a synthetic example input (no NEU pixels).
+  - Parity on `val` (never `test_frozen`) must hold before the file is kept: logits within `export.parity.atol`, identical predicted classes, and identical review routing at the champion's `T` and threshold. Evidence: `results/onnx/export_report.json`.
+  - The ONNX file carries metadata (registry version, checkpoint hash, class order, preprocessing) and is logged to the champion's MLflow run; the version gets `onnx_sha256` and `onnx_artifact` tags so serving can verify the file it downloads.
+- **Reason:** One source of truth for `T` and the threshold (the registry tags) instead of a second copy baked into the graph; a new calibration or threshold does not require a new ONNX file, and INT8 quantisation (TASK-016) works on the plain classifier graph.
+- **Consequences:** Serving must never use the ONNX output as probabilities directly; a test in TASK-018 must check that `T` is applied. Supersedes the "with temperature applied" wording of TASK-015.

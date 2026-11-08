@@ -16,7 +16,7 @@ RAW_DIR := data/raw
 PARAMS := configs/params.yaml
 
 .PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
-	compare-val calibrate threshold evaluate champion export-onnx register kaggle-dataset kaggle-push kaggle-status kaggle-output
+	compare-val calibrate threshold evaluate champion export-onnx quantize register kaggle-dataset kaggle-push kaggle-status kaggle-output
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -91,6 +91,9 @@ evaluate: ## Both models on test_frozen -> results/eval/ (CPU; after compare-val
 
 export-onnx: ## FP32 ONNX of @champion + parity on val (CPU; ADR-025). ARGS: --log-mlflow
 	$(RUN_TRAIN) $(ENV_FILE) python -m src.training.export_onnx --config $(PARAMS) $(ARGS)
+
+quantize: ## Static INT8 QDQ of the champion ONNX + FP32 vs INT8 on val (ADR-026). ARGS: --log-mlflow
+	$(RUN_TRAIN) $(ENV_FILE) python -m src.training.quantize --config $(PARAMS) $(ARGS)
 
 champion: ## Set the first @champion with linked evidence (ADR-024). Dry run; ARGS=--apply writes
 	$(RUN_TRAIN) $(ENV_FILE) python -m src.tracking.promote --config $(PARAMS) $(ARGS)

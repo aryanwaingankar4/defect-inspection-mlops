@@ -110,6 +110,23 @@ export:                            # src/training/export_onnx.py (TASK-015, ADR-
     atol: 1.0e-4
     rtol: 1.0e-4
 
+quantize:                          # src/training/quantize.py (TASK-016, ADR-002, ADR-026): static INT8 QDQ, CPU only
+  calibration_split: train_v1      # ADR-002: training data only, never val or test_frozen
+  calibrate_method: MinMax         # one fixed setting, no search (ADR-026)
+  per_channel: true                # INT8 weights per output channel
+  activation_type: QInt8
+  weight_type: QInt8
+  reduce_range: false              # not needed on CPUs with VNNI (this laptop: Raptor Lake)
+  batch_size: 32                   # calibration feed and val inference
+  rule:                            # ADR-026, on val, INT8 vs FP32 ONNX; plus the ADR-023 risk check
+    max_class_f1_drop: 0.02        # about one extra error in a class of 30
+    max_macro_f1_drop: 0.01
+  latency:                         # rough single-process timing on this CPU (load benchmark: TASK-022)
+    warmup: 10
+    runs: 50
+    batch_sizes: [1, 32]
+  report_file: results/onnx/quantization_report.json
+
 promotion:                         # src/tracking/promote.py (TASK-014, ADR-024); gate rules come with ADR-005
   champion_alias: champion         # serves predictions (ADR-001)
   challenger_alias: challenger     # candidate under the promotion gate (Phase 3)

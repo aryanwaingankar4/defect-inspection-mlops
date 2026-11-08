@@ -3,6 +3,7 @@
 import copy
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -235,8 +236,18 @@ def test_committed_promotion_log_matches_the_evidence():
     assert first["run_id"] == pointer["run_id"]
     assert first["version"] == pointer["registered_version"]
     assert first["model"] == PARAMS["train"]["model"]
+    # The evidence is pinned to results_commit (links in the registry point there); the files
+    # may change later (e.g. TASK-017 added an ood block), so check them as of that commit.
     for item in first["evidence"].values():
-        assert _sha(REPO_ROOT / item["file"]) == item["sha256"]
+        shown = subprocess.run(
+            ["git", "show", f"{first['results_commit']}:{item['file']}"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            check=False,
+        )
+        if shown.returncode != 0:
+            pytest.skip(f"commit {first['results_commit'][:7]} not available (shallow clone?)")
+        assert hashlib.sha256(shown.stdout).hexdigest() == item["sha256"], item["file"]
 
 
 @pytest.mark.needs_model

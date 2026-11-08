@@ -1,0 +1,82 @@
+{
+  "cross_split_pairs_compared": 911700,
+  "min_distance": 10,
+  "cumulative_counts_le_distance": {
+    "0": {
+      "pairs": 0,
+      "same_class": 0,
+      "different_class": 0
+    },
+    "2": {
+      "pairs": 0,
+      "same_class": 0,
+      "different_class": 0
+    },
+    "4": {
+      "pairs": 0,
+      "same_class": 0,
+      "different_class": 0
+    },
+    "6": {
+      "pairs": 0,
+      "same_class": 0,
+      "different_class": 0
+    },
+    "8": {
+      "pairs": 0,
+      "same_class": 0,
+      "different_class": 0
+    }
+  },
+  "alert_distance": 2,
+  "alert_pairs": 0,
+  "alert_pairs_by_split_pair": {},
+  "cross_split_distance_histogram": {
+    "10": 2,
+    "12": 6,
+    "14": 22,
+    "16": 129,
+    "18": 789,
+    "20": 3354,
+    "22": 12069,
+    "24": 33459,
+    "26": 72838,
+    "28": 124189,
+    "30": 167980,
+    "32": 177866,
+    "34": 147648,
+    "36": 95384,
+    "38": 48774,
+    "40": 19480,
+    "42": 6037,
+    "44": 1366,
+    "46": 257,
+    "48": 43,
+    "50": 7,
+    "52": 1
+  },
+  "within_split_alert_pairs": [
+    {
+      "distance": 0,
+      "path_a": "NEU-DET/train/images/patches/patches_101.jpg",
+      "class_a": "patches",
+      "split_a": "test_frozen",
+      "path_b": "NEU-DET/train/images/patches/patches_105.jpg",
+      "class_b": "patches",
+      "split_b": "test_frozen",
+      "same_class": 1
+    }
+  ],
+  "params": {
+    "hash_size": 8,
+    "max_distance": 8,
+    "report_distances": [
+      0,
+      2,
+      4,
+      6,
+      8
+    ],
+    "alert_distance": 2
+  }
+}

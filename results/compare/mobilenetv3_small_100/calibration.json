@@ -1,0 +1,408 @@
+{
+  "model": "mobilenetv3_small_100",
+  "timm_model": "mobilenetv3_small_100.lamb_in1k",
+  "decision_record": "ADR-006",
+  "temperature": 1.171156663870186,
+  "at_bound": false,
+  "t_range": [
+    0.25,
+    4.0
+  ],
+  "method": "one temperature minimising mean val NLL (log grid + golden-section search)",
+  "apply": "probabilities = softmax(logits / temperature); predicted class unchanged",
+  "classes": [
+    "crazing",
+    "inclusion",
+    "patches",
+    "pitted_surface",
+    "rolled-in_scale",
+    "scratches"
+  ],
+  "checkpoint_sha256": "334ff9581d0c12990740aabe6cbdb11f993f146d18b0e84c348f2e2af321834b",
+  "train_run_uid": "ce5dad6d2fdd432ba7f8654940bb7f65",
+  "fitted_on": {
+    "split": "val",
+    "split_file": "neu_split_v2.csv",
+    "split_sha256": "f38cdd74a1437d512db8012edfd28f534687e17fe01dac1e21d56c747b3062ec",
+    "n_images": 180,
+    "n_errors": 1
+  },
+  "temperature_interval": {
+    "ci_low": 0.25,
+    "ci_high": 1.7985548127959254,
+    "n_resamples": 2000,
+    "share_on_bound": 0.3465
+  },
+  "val": {
+    "in_sample": {
+      "note": "T fitted and scored on the same images: optimistic by construction",
+      "n_images": 180,
+      "n_errors": 1,
+      "before": {
+        "ece": {
+          "value": 0.006450437506039967,
+          "ci_low": 0.0010151326614036222,
+          "ci_high": 0.018490709202286394
+        },
+        "nll": {
+          "value": 0.017658749595284462,
+          "ci_low": 0.0010403079417301345,
+          "ci_high": 0.0485891374759376
+        },
+        "brier": {
+          "value": 0.010342725578933041,
+          "ci_low": 8.600536973076938e-05,
+          "ci_high": 0.030410617479056268
+        }
+      },
+      "after": {
+        "ece": {
+          "value": 0.005262243353991316,
+          "ci_low": 0.0016177934334471922,
+          "ci_high": 0.01733069327790616
+        },
+        "nll": {
+          "value": 0.01724093489081889,
+          "ci_low": 0.0018365231937609134,
+          "ci_high": 0.04478839196141241
+        },
+        "brier": {
+          "value": 0.010154651721314491,
+          "ci_low": 0.00020373153571612916,
+          "ci_high": 0.029194464198894873
+        }
+      },
+      "change": {
+        "ece": {
+          "value": -0.0011881941520486506,
+          "ci_low": -0.002983346855916152,
+          "ci_high": 0.001929002447376619
+        },
+        "nll": {
+          "value": -0.0004178147044655717,
+          "ci_low": -0.004757816780677022,
+          "ci_high": 0.0022505176227975653
+        },
+        "brier": {
+          "value": -0.0001880738576185495,
+          "ci_low": -0.0016704825413209085,
+          "ci_high": 0.000811644318960292
+        }
+      },
+      "verdict": {
+        "ece": "no clear change: the interval of the change includes 0",
+        "nll": "no clear change: the interval of the change includes 0",
+        "brier": "no clear change: the interval of the change includes 0"
+      },
+      "reliability_before": {
+        "n_bins": 15,
+        "count": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          3,
+          176
+        ],
+        "confidence": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          0.7276992201805115,
+          null,
+          null,
+          0.9220725297927856,
+          0.9993036341938105
+        ],
+        "accuracy": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          1.0,
+          null,
+          null,
+          0.6666666666666666,
+          1.0
+        ]
+      },
+      "reliability_after": {
+        "n_bins": 15,
+        "count": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          5,
+          174
+        ],
+        "confidence": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          0.6810066618281289,
+          null,
+          null,
+          0.9062845382065159,
+          0.9994437484223334
+        ],
+        "accuracy": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          1.0,
+          null,
+          null,
+          0.8,
+          1.0
+        ]
+      },
+      "caution": "Only 1 of 180 images are misclassified, so NLL and ECE rest mostly on those few images; treat small changes as uncertain."
+    },
+    "cross_fitted": {
+      "note": "5 folds stratified by class with near-copy groups kept together; each fold scored with T fitted on the other folds",
+      "fold_temperatures": [
+        0.25,
+        1.2259095256785655,
+        1.19603019526049,
+        1.2765291097200564,
+        1.3464204016767738
+      ],
+      "fold_at_bound": [
+        true,
+        false,
+        false,
+        false,
+        false
+      ],
+      "n_images": 180,
+      "n_errors": 1,
+      "before": {
+        "ece": {
+          "value": 0.006450437506039967,
+          "ci_low": 0.0010151326614036222,
+          "ci_high": 0.018490709202286394
+        },
+        "nll": {
+          "value": 0.017658749595284462,
+          "ci_low": 0.0010403079417301345,
+          "ci_high": 0.0485891374759376
+        },
+        "brier": {
+          "value": 0.010342725578933041,
+          "ci_low": 8.600536973076938e-05,
+          "ci_high": 0.030410617479056268
+        }
+      },
+      "after": {
+        "ece": {
+          "value": 0.008673192751908875,
+          "ci_low": 0.001731328888446868,
+          "ci_high": 0.022124187789578687
+        },
+        "nll": {
+          "value": 0.06054560001137311,
+          "ci_low": 0.0018000376049448579,
+          "ci_high": 0.1768090847452416
+        },
+        "brier": {
+          "value": 0.012643973032880347,
+          "ci_low": 0.00019648034941572827,
+          "ci_high": 0.03646068668558594
+        }
+      },
+      "change": {
+        "ece": {
+          "value": 0.0022227552458689084,
+          "ci_low": -7.167683448749775e-05,
+          "ci_high": 0.0055825362789749455
+        },
+        "nll": {
+          "value": 0.04288685041608865,
+          "ci_low": 0.00041154141940889983,
+          "ci_high": 0.1287919549395733
+        },
+        "brier": {
+          "value": 0.002301247453947306,
+          "ci_low": 8.560338594980708e-05,
+          "ci_high": 0.006075698214209483
+        }
+      },
+      "verdict": {
+        "ece": "no clear change: the interval of the change includes 0",
+        "nll": "higher after calibration (interval of the change is above 0)",
+        "brier": "higher after calibration (interval of the change is above 0)"
+      },
+      "reliability_before": {
+        "n_bins": 15,
+        "count": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          3,
+          176
+        ],
+        "confidence": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          0.7276992201805115,
+          null,
+          null,
+          0.9220725297927856,
+          0.9993036341938105
+        ],
+        "accuracy": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          1.0,
+          null,
+          null,
+          0.6666666666666666,
+          1.0
+        ]
+      },
+      "reliability_after": {
+        "n_bins": 15,
+        "count": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1,
+          2,
+          176
+        ],
+        "confidence": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          0.6405076619440925,
+          null,
+          null,
+          0.8615977740928629,
+          0.9039732664764479,
+          0.9992683333200764
+        ],
+        "accuracy": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          1.0,
+          null,
+          null,
+          1.0,
+          1.0,
+          0.9943181818181818
+        ]
+      },
+      "caution": "Only 1 of 180 images are misclassified, so NLL and ECE rest mostly on those few images; treat small changes as uncertain."
+    }
+  },
+  "bootstrap": {
+    "method": "cluster bootstrap stratified by class, percentile interval",
+    "unit": "confirmed near-copy group (ADR-021) or single image",
+    "n_units": 164,
+    "n_groups": 15,
+    "n_resamples": 10000,
+    "seed": 13,
+    "level": 0.95
+  },
+  "provenance": {
+    "git_commit": "202b0b5a6ebf132b4bfaef7a06e8a2b77b587415",
+    "git_dirty": false,
+    "device": "cpu",
+    "torch": "2.15.0+cpu"
+  },
+  "summary": "T = 1.171 (95% interval 0.250 to 1.799). Val has 1 misclassified of 180 images, so the scores rest on very few errors. Honest (cross-fitted) change on val: ECE: no clear change: the interval of the change includes 0; NLL: higher after calibration (interval of the change is above 0); BRIER: higher after calibration (interval of the change is above 0). T is poorly determined: the fit sat on a range bound in 35% of bootstrap resamples and in 1 of 5 cross-fit folds (a resample or fold with no errors pushes T to the lower bound)."
+}

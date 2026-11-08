@@ -1,0 +1,492 @@
+"""Fine-tune a timm ImageNet model on the NEU split (TASK-008).
+
+Full training runs on Kaggle GPU only (ADR-019). On a laptop without a GPU, only
+``--smoke`` (a tiny end-to-end check) runs unless ``--allow-cpu`` is passed.
+
+    python -m src.training.train --config configs/params.yaml [--smoke] [--allow-cpu]
+        [--raw-dir DIR] [--split-file CSV] [--out-checkpoint PT] [--out-dir DIR] [--num-workers N]
+        [--model TIMM_NAME]
+
+Outputs only files and needs no credentials (ADR-020): the checkpoint, ``val_metrics.json``
+(metrics, provenance, timing, checkpoint SHA-256), ``training_curves.csv/.png`` and the
+effective ``params.yaml`` in ``--out-dir``. This module never talks to MLflow: the laptop
+publishes a finished run with ``python -m src.tracking.publish`` (``make register``).
+"""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import csv
+import hashlib
+import json
+import os
+import random
+import subprocess
+import sys
+import time
+import uuid
+from collections.abc import Callable, Sequence
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import timm
+import torch
+import yaml
+from torch import nn
+from torch.utils.data import DataLoader, WeightedRandomSampler
+
+from src.config import load_params
+from src.serving.preprocess import PreprocessConfig
+from src.training.augment import AugmentConfig
+from src.training.dataset import SplitDataset, class_names
+from src.training.metrics import accuracy, macro_f1, per_class_f1
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+CHECKPOINT_FORMAT = 1
+EXIT_NEEDS_GPU = 2
+
+
+# ---------------------------------------------------------------- config + CLI
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--raw-dir", type=Path, help="override data.raw_dir")
+    parser.add_argument("--split-file", type=Path, help="override data.split_file")
+    parser.add_argument("--out-checkpoint", type=Path, help="override train.out_checkpoint")
+    parser.add_argument("--out-dir", type=Path, help="override train.out_dir")
+    parser.add_argument("--num-workers", type=int, help="override train.num_workers")
+    parser.add_argument("--model", help="override train.model (a timm model name)")
+    parser.add_argument("--smoke", action="store_true", help="tiny run; allowed on CPU")
+    parser.add_argument("--allow-cpu", action="store_true", help="allow a full run without GPU")
+    return parser.parse_args(argv)
+
+
+def apply_overrides(params: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    """Return a copy of params with smoke settings, then CLI overrides, applied."""
+    p = copy.deepcopy(params)
+    t = p["train"]
+    if args.smoke:
+        smoke_dir = Path(t["smoke"]["out_dir"])
+        t["max_epochs"] = int(t["smoke"]["max_epochs"])
+        t["out_checkpoint"] = (smoke_dir / "best.pt").as_posix()
+        t["out_dir"] = (smoke_dir / "results").as_posix()
+    if args.raw_dir is not None:
+        p["data"]["raw_dir"] = args.raw_dir.as_posix()
+    if args.split_file is not None:
+        p["data"]["split_file"] = args.split_file.as_posix()
+    if args.out_checkpoint is not None:
+        t["out_checkpoint"] = args.out_checkpoint.as_posix()
+    if args.out_dir is not None:
+        t["out_dir"] = args.out_dir.as_posix()
+    if args.num_workers is not None:
+        t["num_workers"] = args.num_workers
+    if args.model is not None:
+        t["model"] = args.model
+    return p
+
+
+def resolve_device() -> torch.device:
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def gpu_supported(capability: tuple[int, int], arch_list: Sequence[str]) -> bool:
+    """True if this torch build has kernels for the GPU (exact ``sm_XY`` or older-or-equal PTX)."""
+    cap = capability[0] * 10 + capability[1]
+    if f"sm_{cap}" in arch_list:
+        return True
+    ptx = [int(a.removeprefix("compute_")) for a in arch_list if a.startswith("compute_")]
+    return any(p <= cap for p in ptx)
+
+
+def check_gpu(device: torch.device) -> None:
+    """Print the GPU and stop early if torch cannot run on it (e.g. P100 with CUDA 13 builds)."""
+    if device.type != "cuda":
+        return
+    name, cap = torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0)
+    arch_list = torch.cuda.get_arch_list()
+    print(f"GPU: {name} (sm_{cap[0]}{cap[1]}); torch {torch.__version__}", flush=True)
+    if not gpu_supported(cap, arch_list):
+        raise RuntimeError(
+            f"torch {torch.__version__} has no kernels for {name} (sm_{cap[0]}{cap[1]}); "
+            f"supported: {', '.join(arch_list)}. Use a T4 on Kaggle (ADR-019)."
+        )
+
+
+def check_device(device: torch.device, *, smoke: bool, allow_cpu: bool) -> bool:
+    """True if training may start. Full runs without a GPU need ``--allow-cpu`` (ADR-019)."""
+    if device.type == "cuda" or smoke:
+        return True
+    print(
+        "WARNING: no GPU found. Full training runs on Kaggle GPU only (ADR-019); on this "
+        "machine it may run out of memory. Use --smoke for a tiny check, or pass --allow-cpu "
+        "to force a full CPU run.",
+        file=sys.stderr,
+    )
+    return allow_cpu
+
+
+# ---------------------------------------------------------------- building blocks
+
+
+def set_seeds(seed: int) -> None:
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")  # deterministic cuBLAS
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    torch.use_deterministic_algorithms(True, warn_only=True)
+
+
+def _seed_worker(worker_id: int) -> None:
+    seed = torch.initial_seed() % 2**32
+    np.random.seed(seed)
+    random.seed(seed)
+
+
+def build_model(name: str, num_classes: int, pretrained: bool) -> nn.Module:
+    """timm model with a new ``num_classes`` head; the whole network is trainable."""
+    return timm.create_model(name, pretrained=pretrained, num_classes=num_classes)
+
+
+def balanced_sampler(labels: Sequence[int], generator: torch.Generator) -> WeightedRandomSampler:
+    """Each class is drawn equally often on average (weight = 1 / class count)."""
+    counts = np.bincount(np.asarray(labels))
+    weights = torch.as_tensor([1.0 / counts[y] for y in labels], dtype=torch.double)
+    return WeightedRandomSampler(weights, len(labels), replacement=True, generator=generator)
+
+
+class EarlyStopping:
+    """Track the best score; stop after ``patience`` epochs without a strict improvement."""
+
+    def __init__(self, patience: int) -> None:
+        if patience < 1:
+            raise ValueError("patience must be >= 1")
+        self.patience = patience
+        self.best = float("-inf")
+        self.bad_epochs = 0
+
+    def update(self, score: float) -> bool:
+        """Record a score; return True if it is a new best."""
+        if score > self.best:
+            self.best, self.bad_epochs = score, 0
+            return True
+        self.bad_epochs += 1
+        return False
+
+    @property
+    def should_stop(self) -> bool:
+        return self.bad_epochs >= self.patience
+
+
+def train_one_epoch(
+    model: nn.Module, loader: DataLoader, optimizer: torch.optim.Optimizer, device: torch.device
+) -> float:
+    model.train()
+    loss_fn = nn.CrossEntropyLoss()
+    total, n = 0.0, 0
+    for x, y in loader:
+        x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
+        optimizer.zero_grad(set_to_none=True)
+        loss = loss_fn(model(x), y)
+        loss.backward()
+        optimizer.step()
+        total += loss.item() * len(y)
+        n += len(y)
+    return total / n
+
+
+@torch.inference_mode()
+def predict(
+    model: nn.Module, loader: DataLoader, device: torch.device
+) -> tuple[float, np.ndarray, np.ndarray]:
+    """Mean cross-entropy, true labels and predicted labels over the loader."""
+    model.eval()
+    loss_fn = nn.CrossEntropyLoss(reduction="sum")
+    total, y_true, y_pred = 0.0, [], []
+    for x, y in loader:
+        x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
+        logits = model(x)
+        total += loss_fn(logits, y).item()
+        y_true.append(y.cpu().numpy())
+        y_pred.append(logits.argmax(dim=1).cpu().numpy())
+    true, pred = np.concatenate(y_true), np.concatenate(y_pred)
+    return total / len(true), true, pred
+
+
+# ---------------------------------------------------------------- provenance + outputs
+
+
+def git_commit(repo_root: Path) -> dict[str, Any]:
+    try:
+        sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo_root, capture_output=True, text=True, check=True
+        ).stdout.strip()
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return {"sha": "unknown", "dirty": None}
+    return {"sha": sha, "dirty": bool(status)}
+
+
+def dvc_data_md5(repo_root: Path) -> str | None:
+    """The DVC hash of ``data/raw`` from the committed ``data/raw.dvc`` (the data version)."""
+    dvc_file = repo_root / "data" / "raw.dvc"
+    if not dvc_file.exists():
+        return None
+    outs = yaml.safe_load(dvc_file.read_text(encoding="utf-8")).get("outs", [])
+    return outs[0].get("md5") if outs else None
+
+
+def runtime_name() -> str:
+    """``kaggle`` inside a Kaggle notebook run, else ``local``."""
+    return "kaggle" if os.environ.get("KAGGLE_KERNEL_RUN_TYPE") else "local"
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def data_fingerprint(raw_dir: Path, rel_paths: Sequence[str]) -> str:
+    """SHA-256 over (path, file SHA-256) of the images actually used, in sorted order.
+
+    Comparable across machines (laptop DVC copy vs Kaggle dataset) for the same split.
+    """
+    h = hashlib.sha256()
+    for rel in sorted(rel_paths):
+        h.update(rel.encode("utf-8"))
+        h.update(hashlib.sha256((raw_dir / rel).read_bytes()).digest())
+    return h.hexdigest()
+
+
+def write_curve(rows: list[dict[str, float]], out_dir: Path) -> None:
+    # Jupyter (e.g. Kaggle) exports MPLBACKEND=module://matplotlib_inline...; our venv has no
+    # matplotlib_inline, so `import matplotlib` would fail on it. We only write files: force Agg.
+    os.environ["MPLBACKEND"] = "Agg"
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    with (out_dir / "training_curves.csv").open("w", encoding="utf-8", newline="\n") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]), lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+
+    epochs = [r["epoch"] for r in rows]
+    fig, (ax_loss, ax_f1) = plt.subplots(1, 2, figsize=(10, 4))
+    ax_loss.plot(epochs, [r["train_loss"] for r in rows], label="train")
+    ax_loss.plot(epochs, [r["val_loss"] for r in rows], label="val")
+    ax_loss.set(xlabel="epoch", ylabel="cross-entropy", title="Loss")
+    ax_loss.legend()
+    ax_f1.plot(epochs, [r["val_macro_f1"] for r in rows], marker="o")
+    ax_f1.set(xlabel="epoch", ylabel="macro-F1", title="Validation macro-F1")
+    fig.tight_layout()
+    fig.savefig(out_dir / "training_curves.png", dpi=100)
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------- main loop
+
+
+def _save_checkpoint(path: Path, model: nn.Module, meta: dict[str, Any]) -> None:
+    torch.save(
+        {"format_version": CHECKPOINT_FORMAT, "state_dict": model.state_dict(), **meta}, path
+    )
+
+
+def _fit(
+    model: nn.Module,
+    loaders: tuple[DataLoader, DataLoader],
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    classes: Sequence[str],
+    t: dict[str, Any],
+    on_best: Callable[[int, float], None],
+) -> tuple[list[dict[str, float]], dict[str, Any], bool]:
+    """Epoch loop with early stopping. Returns (curve rows, best-epoch metrics, stopped early)."""
+    train_loader, val_loader = loaders
+    stopper = EarlyStopping(int(t["patience"]))
+    curve: list[dict[str, float]] = []
+    best: dict[str, Any] = {}
+    for epoch in range(1, int(t["max_epochs"]) + 1):
+        start = time.perf_counter()
+        train_loss = train_one_epoch(model, train_loader, optimizer, device)
+        val_loss, y_true, y_pred = predict(model, val_loader, device)
+        f1 = macro_f1(y_true, y_pred, len(classes))
+        row = {
+            "epoch": epoch,
+            "train_loss": train_loss,
+            "val_loss": val_loss,
+            "val_macro_f1": f1,
+            "seconds": time.perf_counter() - start,
+        }
+        curve.append(row)
+        improved = stopper.update(f1)
+        print(
+            f"epoch {epoch:3d}  train_loss {train_loss:.4f}  val_loss {val_loss:.4f}  "
+            f"val_macro_f1 {f1:.4f}  {row['seconds']:.1f}s{'  *best*' if improved else ''}",
+            flush=True,
+        )
+        if improved:
+            per_class = per_class_f1(y_true, y_pred, len(classes)).tolist()
+            best = {
+                "epoch": epoch,
+                "val_loss": val_loss,
+                "val_macro_f1": f1,
+                "val_accuracy": accuracy(y_true, y_pred),
+                "val_per_class_f1": dict(zip(classes, per_class, strict=True)),
+            }
+            on_best(epoch, f1)
+        if stopper.should_stop:
+            break
+    return curve, best, stopper.should_stop
+
+
+def _write_outputs(
+    metrics: dict[str, Any], curve: list[dict[str, float]], params: dict[str, Any], out_dir: Path
+) -> None:
+    (out_dir / "val_metrics.json").write_bytes((json.dumps(metrics, indent=2) + "\n").encode())
+    (out_dir / "params.yaml").write_bytes(yaml.safe_dump(params, sort_keys=False).encode())
+    write_curve(curve, out_dir)
+
+
+def run(
+    params: dict[str, Any],
+    device: torch.device,
+    *,
+    smoke: bool = False,
+    repo_root: Path = REPO_ROOT,
+) -> dict[str, Any]:
+    """Train with early stopping on val macro-F1. Returns the metrics written to JSON."""
+    t = params["train"]
+    set_seeds(int(t["seed"]))
+    raw_dir, split_csv = Path(params["data"]["raw_dir"]), Path(params["data"]["split_file"])
+    pre_cfg = PreprocessConfig.from_params(params)
+    classes = class_names(split_csv, t["train_splits"])
+    per_class = int(t["smoke"]["images_per_class"]) if smoke else None
+
+    common = {"split_csv": split_csv, "raw_dir": raw_dir, "classes": classes, "preprocess": pre_cfg}
+    train_ds = SplitDataset(
+        splits=t["train_splits"],
+        augment_cfg=AugmentConfig.from_params(params),
+        images_per_class=per_class,
+        **common,
+    )
+    val_ds = SplitDataset(splits=[t["val_split"]], images_per_class=per_class, **common)
+
+    gen = torch.Generator().manual_seed(int(t["seed"]))
+    loader_kw = {
+        "batch_size": int(t["batch_size"]),
+        "num_workers": int(t["num_workers"]),
+        "pin_memory": device.type == "cuda",
+        "worker_init_fn": _seed_worker,
+        "persistent_workers": int(t["num_workers"]) > 0,
+    }
+    # Drop a ragged last batch (it could hold 1 image, which BatchNorm cannot train on).
+    # The sampler draws with replacement, so no image is systematically left out.
+    train_loader = DataLoader(
+        train_ds,
+        sampler=balanced_sampler(train_ds.labels, gen),
+        generator=gen,
+        drop_last=len(train_ds) > int(t["batch_size"]),
+        **loader_kw,
+    )
+    val_loader = DataLoader(val_ds, shuffle=False, **loader_kw)
+
+    model = build_model(t["model"], len(classes), bool(t["pretrained"])).to(device)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=float(t["lr"]), weight_decay=float(t["weight_decay"])
+    )
+
+    ckpt_path, out_dir = Path(t["out_checkpoint"]), Path(t["out_dir"])
+    ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    commit = git_commit(repo_root)
+    provenance = {
+        "git_commit": commit["sha"],
+        "git_dirty": commit["dirty"],
+        "dvc_data_md5": dvc_data_md5(repo_root),
+        "data_fingerprint": data_fingerprint(raw_dir, train_ds.paths + val_ds.paths),
+        "split_file": split_csv.name,  # which split (ADR-021: v1 had near-copies across splits)
+        "split_sha256": sha256_file(split_csv),
+        "torch": torch.__version__,
+        "timm": timm.__version__,
+        "runtime": runtime_name(),
+    }
+    preprocess = {k: list(v) if isinstance(v, tuple) else v for k, v in asdict(pre_cfg).items()}
+    ckpt_meta = {
+        "model_name": t["model"],
+        "classes": list(classes),
+        "preprocess": preprocess,
+        "seed": int(t["seed"]),
+        "git_commit": commit["sha"],
+    }
+    started_at_ms = int(time.time() * 1000)
+
+    def on_best(epoch: int, f1: float) -> None:
+        meta = {**ckpt_meta, "best_epoch": epoch, "val_macro_f1": f1, "smoke": smoke}
+        _save_checkpoint(ckpt_path, model, meta)
+
+    curve, best, stopped_early = _fit(
+        model, (train_loader, val_loader), optimizer, device, classes, t, on_best
+    )
+    metrics = {
+        "best_epoch": best["epoch"],
+        "val_macro_f1": best["val_macro_f1"],
+        "val_accuracy": best["val_accuracy"],
+        "val_loss": best["val_loss"],
+        "val_per_class_f1": best["val_per_class_f1"],
+        "epochs_run": len(curve),
+        "stopped_early": stopped_early,
+        "classes": list(classes),
+        "n_train": len(train_ds),
+        "n_val": len(val_ds),
+        "smoke": smoke,
+        "device": device.type,
+        "model": t["model"],
+        "n_params": sum(p.numel() for p in model.parameters()),
+        "run_uid": uuid.uuid4().hex,  # identifies this training run when it is published
+        "timing": {"started_at_ms": started_at_ms, "finished_at_ms": int(time.time() * 1000)},
+        "checkpoint": ckpt_path.as_posix(),
+        "checkpoint_sha256": sha256_file(ckpt_path),
+        "provenance": provenance,
+        "params": {"data": params["data"], "preprocess": params["preprocess"], "train": t},
+    }
+    _write_outputs(metrics, curve, params, out_dir)
+    return metrics
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
+    params = apply_overrides(load_params(args.config), args)
+    device = resolve_device()
+    if not check_device(device, smoke=args.smoke, allow_cpu=args.allow_cpu):
+        return EXIT_NEEDS_GPU
+    check_gpu(device)
+    print(f"device: {device.type}{'  (smoke run)' if args.smoke else ''}", flush=True)
+    metrics = run(params, device, smoke=args.smoke)
+    print(
+        f"best epoch {metrics['best_epoch']}: val macro-F1 {metrics['val_macro_f1']:.4f}; "
+        f"outputs in {params['train']['out_dir']} and {metrics['checkpoint']}\n"
+        "Not in MLflow yet: the laptop publishes runs with `make register` (ADR-020)."
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

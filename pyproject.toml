@@ -1,0 +1,55 @@
+[project]
+name = "defect-inspection-mlops"
+version = "0.1.0"
+description = "NEU steel-defect classifier with a human-in-the-loop retraining loop."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "numpy>=2.4.6",
+    "pillow>=13.0.0",
+    "pyyaml>=6.0.3",
+]
+
+[dependency-groups]
+dev = [
+    "dvc>=3.67.1",
+    "imagehash>=4.3.2",
+    "kaggle>=2.2.5",
+    "pytest>=9.2.0",
+    "ruff>=0.17.4",
+    "six>=1.17.0",
+]
+train = [
+    "matplotlib>=3.11.2",
+    "mlflow>=3.18.0",
+    "timm>=1.0.31",
+    "torch>=2.15.0",
+    "torchvision>=0.29.2",
+]
+serve = []
+ui = []
+
+[tool.uv]
+package = false
+required-version = ">=0.13.6"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--strict-markers --strict-config -ra"
+markers = [
+    "slow: long-running test",
+    "manual: needs a human or external service; run on purpose only",
+    "needs_data: needs the dataset (DVC-pulled) on disk",
+    "needs_model: needs a trained model artifact on disk",
+]

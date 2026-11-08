@@ -9,10 +9,12 @@
 
 ## Preprocessing
 - **Parity:** the same image gives the same tensor through the training path and the serving path.
-- Grayscale input is handled exactly as documented (channel replication or `in_chans=1`).
+- Grayscale handling (ADR-016): any input (L, RGB, 3-channel JPEG) is converted to `L`, then replicated to 3 identical channels.
 
 ## Model
-- **Golden image:** a fixed image gives a fixed predicted class with the committed model.
+- **Golden images (ADR-017):**
+  - a committed synthetic image gives a fixed output with the committed model (runs in CI);
+  - a fixed real NEU image from `data/raw/` gives a fixed predicted class (`needs_data`; the image is never committed).
 - Temperature `T` is applied in the serving path. Serving confidence matches the calibrated evaluation output.
 - FP32 vs INT8 per-class F1 is recorded in `results/`.
 
@@ -45,5 +47,16 @@
 - Prometheus exposes latency, request count, confidence histogram, queue size and audit error rate.
 - An Evidently report on a clean stream and on a shifted stream is written to `results/`.
 
-## Deployment (manual)
-- The live Hugging Face Space loads, classifies a sample image and shows the model version.
+## Database
+- The DB layer passes the same tests on SQLite (CI) and on Postgres (CI service container or manual), switched only by `DATABASE_URL`.
+
+## Deployment (Azure)
+- A push to `main` runs `deploy-azure.yml`: CI passes, the image is pushed to GHCR, and both Container Apps are updated.
+- **Manual:** the public Azure API URL returns `/health` with the model version and alias, and classifies a sample image through `/predict`.
+- **Manual:** `/predict` on the public URL without an API key → 401.
+- **Manual:** the review UI app loads and shows queued items from Postgres.
+- **Manual:** after an app restart or scale to zero, logged predictions are still in Postgres.
+- **Manual:** rollback redeploy restores the previous image tag, and `/health` reports the previous version.
+- No Azure credentials or other secrets in the repo (Trivy secret scan in CI).
+- **Manual:** the Azure budget alert exists.
+- **Optional:** if a Hugging Face Space is built, it loads, classifies a sample image and shows the model version.

@@ -1,0 +1,167 @@
+# Single source of seeds, sizes, hyperparameters, thresholds and gate rules.
+
+data:
+  raw_dir: data/raw                              # DVC/git-ignored NEU images (ADR-015)
+  split_file: data/splits/neu_split_v2.csv       # committed: path,class,split. Group-aware (ADR-021)
+  split_file_v1: data/splits/neu_split_v1.csv    # first split, kept for history: near-copies cross splits
+
+split:
+  seed: 42                                       # split-only seed; independent of training seeds
+  # Images per class, cut in this order after a seeded shuffle. Must sum to 300 (NEU per class).
+  per_class:
+    train_v1: 25
+    val: 30
+    test_frozen: 60
+    production_stream: 185
+  groups:                          # v2 only (ADR-021): each group of near-copies stays in one split
+    max_size_outside_last: 3       # bigger groups always go to the last split (production_stream)
+
+preprocess:                        # used by src/serving/preprocess.py only (train, eval, serve)
+  image_size: 224                  # square output side in pixels
+  interpolation: bilinear          # resize filter: nearest | bilinear | bicubic | lanczos
+  mean: [0.485, 0.456, 0.406]      # ImageNet, per channel, on [0,1] pixels
+  std: [0.229, 0.224, 0.225]       # ImageNet, per channel
+
+train:                             # src/training/train.py; full runs on Kaggle GPU only (ADR-019)
+  seed: 1                          # training seed, independent of split.seed
+  model: efficientnet_b0           # timm model name
+  pretrained: true                 # ImageNet weights (downloaded once from the HF Hub)
+  train_splits: [train_v1]         # feedback is added in Phase 3 (TASK-028)
+  val_split: val                   # early stopping; never test_frozen
+  lr: 0.0003                       # AdamW
+  weight_decay: 0.01               # AdamW
+  batch_size: 16
+  max_epochs: 40
+  patience: 8                      # stop after this many epochs without val macro-F1 improvement
+  num_workers: 0                   # DataLoader workers (CLI --num-workers overrides, e.g. on Kaggle)
+  augment:                         # training only (src/training/augment.py)
+    hflip_p: 0.5
+    vflip_p: 0.5
+    rotation_deg: 10               # angle drawn from [-10, 10]; corners filled with the image's mean grey
+    brightness: 0.10               # factor drawn from [0.9, 1.1]
+    contrast: 0.10                 # factor drawn from [0.9, 1.1]
+  out_checkpoint: models/baseline/best.pt  # git-ignored (CLI --out-checkpoint overrides)
+  out_dir: results/train           # val metrics + training curve (CLI --out-dir overrides)
+  smoke:                           # `--smoke`: tiny end-to-end check, allowed on a CPU laptop
+    images_per_class: 2            # per split, first N per class in split-CSV order
+    max_epochs: 1
+    out_dir: models/smoke          # checkpoint + results of smoke runs; git-ignored
+
+compare_val:                       # src/training/compare_val.py: model choice on val (ADR-022); never test_frozen
+  split: val
+  alpha: 0.05                      # exact two-sided McNemar; p >= alpha keeps the first model as main
+  reproduce_tolerance: 0.000001    # CPU predictions must match the recorded val accuracy / macro-F1
+  batch_size: 32                   # inference only
+  models:                          # first = pre-declared main model (train.model)
+    - name: efficientnet_b0
+      checkpoint: models/baseline/best.pt                        # git-ignored
+      results_dir: results/train
+    - name: mobilenetv3_small_100
+      checkpoint: models/compare/mobilenetv3_small_100/best.pt   # git-ignored
+      results_dir: results/compare/mobilenetv3_small_100
+  out: results/compare/val_mcnemar.json
+
+calibrate:                         # src/training/calibrate.py: temperature scaling on val only (ADR-006)
+  t_min: 0.25                      # declared range for T; a fit on a bound stops the run (nothing written)
+  t_max: 4.0
+  grid_size: 81                    # log-spaced grid over [t_min, t_max], then golden-section refinement (NLL is convex in 1/T)
+  n_bins: 15                       # equal-width confidence bins for ECE and reliability diagrams (val and test)
+  cv_folds: 5                      # cross-fitted val estimate; near-copy groups stay in one fold
+  seed: 13                         # folds + val bootstrap
+  batch_size: 32                   # CPU inference only
+  bootstrap:                       # cluster bootstrap stratified by class (as evaluate)
+    n_resamples: 10000
+    t_resamples: 2000              # resamples on which T is refitted for its interval
+    level: 0.95
+
+threshold:                         # src/training/threshold.py: review threshold, val only (ADR-023)
+  # Main model only (train.model, first in compare_val.models); confidence = calibrated (ADR-006).
+  review_budget: 0.05              # route the ceil(budget * n) least confident val images to review
+  max_risk_ucb: 0.05               # stop (nothing written) if the risk upper bound among accepted is above this
+  ucb_level: 0.95                  # one-sided Clopper-Pearson level (val and test)
+  reference_risk: 0.01             # a risk target val is too small to show; used only in the written claims
+  min_coverage: 0.5                # risk-coverage curve bands from this coverage to 1.0
+  coverage_step: 0.01
+  batch_size: 32                   # CPU inference only
+  bootstrap:                       # cluster bootstrap stratified by class (as evaluate)
+    n_resamples: 10000
+    seed: 17
+    level: 0.95
+  out_file: threshold.json         # in the main model's results_dir, with risk_coverage.png
+
+evaluate:                          # src/training/evaluate.py on test_frozen (TASK-011); reports only, never selects
+  # Models: compare_val.models (same order; main model first). Groups: near_duplicates_cnn.pairs_file at confirm_pixel_corr.
+  batch_size: 32                   # CPU inference only
+  bootstrap:                       # cluster bootstrap stratified by class (near-copy groups resampled together)
+    n_resamples: 10000
+    seed: 11                       # bootstrap only; same resamples for every model
+    level: 0.95                    # two-sided percentile interval
+  out_dir: results/eval            # results/eval/<model>/: test_metrics.json, test_predictions.csv, 2 plots
+
+promotion:                         # src/tracking/promote.py (TASK-014, ADR-024); gate rules come with ADR-005
+  champion_alias: champion         # serves predictions (ADR-001)
+  challenger_alias: challenger     # candidate under the promotion gate (Phase 3)
+  log_file: results/promotion_log.json   # every applied decision, appended
+  code_url: https://github.com/aryanwaingankar4/defect-inspection-mlops  # evidence links in the registry
+
+tracking:                          # MLflow (ADR-018), used on the laptop only (ADR-020). Server from env MLFLOW_TRACKING_URI, else local_uri
+  experiment: neu-training
+  registered_model: steel-defect-classifier
+  smoke_experiment: neu-smoke      # --smoke runs never touch the real experiment or model name
+  smoke_registered_model: steel-defect-classifier-smoke
+  local_uri: sqlite:///mlruns/mlflow.db   # offline fallback (git-ignored); registry needs a DB store;
+                                          # artifacts go to mlruns/artifacts next to it
+
+kaggle:                            # TASK-010: all full training runs on Kaggle GPU (ADR-019), credential-free (ADR-020)
+  dataset_slug: neu-det-private    # PRIVATE dataset owned by the account in ~/.kaggle/kaggle.json
+  dataset_title: NEU-DET private copy
+  kernel_slug: neu-train-launcher  # private notebook; logic-free launcher
+  kernel_title: neu-train-launcher
+  accelerator: NvidiaTeslaT4       # "GPU T4 x2". P100 is retired on Kaggle and unsupported by torch 2.15 (CUDA 13)
+  num_workers: 2
+  repo_url: https://github.com/aryanwaingankar4/defect-inspection-mlops.git
+  uv_version: 0.13.6
+  notebook_template: notebooks/kaggle_train_launcher.ipynb
+  staging_dir: build/kaggle-dataset   # git-ignored; never write into data/raw (would change its DVC hash)
+  kernel_dir: build/kaggle-kernel     # rendered notebook + kernel-metadata.json
+  output_dir: build/kaggle-output     # downloaded run outputs (mirrors /kaggle/working)
+  output_results: results/train       # inside output_dir: val_metrics.json, curves, params.yaml
+  output_checkpoint: models/baseline/best.pt  # inside output_dir; `make register` publishes these (ADR-020)
+
+near_duplicates:
+  hash_size: 8                     # pHash bits = hash_size^2 = 64
+  max_distance: 8                  # cross-split pairs with Hamming distance <= this go to the CSV
+  report_distances: [0, 2, 4, 6, 8]  # cumulative counts (<= d) in the summary
+  alert_distance: 2                # pairs <= this are exact/near-exact: report before any re-split
+  grid_top_k: 12                   # closest cross-split pairs shown in the local PNG grid
+  out_csv: results/near_duplicates.csv
+  out_summary: results/near_duplicates_summary.json
+  out_grid: results/private/near_duplicates_grid.png  # real NEU pixels: git-ignored (ADR-015)
+
+near_duplicates_cnn:               # TASK-008b: shift-tolerant check (src/data/near_duplicates_cnn.py)
+  model: efficientnet_b0           # ImageNet-pretrained timm backbone, head removed; NOT our trained model
+  batch_size: 32                   # forward passes only, CPU
+  seed: 7                          # calibration sampling only
+  report_cosines: [0.85, 0.90, 0.95, 0.97, 0.98]   # counts of cross-split pairs with cosine >= t
+  report_pixel_corrs: [0.2, 0.3, 0.5, 0.7, 0.9]    # counts of pairs with pixel corr >= t
+  candidate_cosine: 0.85           # pairs at/above get the pixel check: keeps ~95% of synthetic
+                                   # copies shifted <= 16 px (calibration in pairs_summary)
+  confirm_pixel_corr: 0.3          # near-copy if pixel corr >= this: random same-class pairs have
+                                   # p95 ~0.16; real overlaps seen by eye down to ~0.3 (ADR-021)
+  keep_pixel_corr: 0.1             # candidates at/above go to pairs_file (also near misses)
+  highpass_px: 9                   # local-mean box removed before the pixel check (odd)
+  max_shift: 48                    # pixel check: best over shifts in [-48, 48] px on both axes
+  calib_same_class_pairs: 20000    # random same-class pairs, any split (cosine baseline)
+  calib_pixel_pairs: 5000          # first N of those also get the pixel check
+  calib_shift_images_per_class: 30 # images per class used for synthetic shifted-crop pairs
+  calib_shifts: [8, 16, 32]        # px, applied to both axes; crop side = image side - max
+  max_candidates: 150000           # refuse if more pairs than this reach candidate_cosine
+  summary_top_k: 20                # pairs listed in the summary JSONs
+  grid_top_k: 24                   # cross-split pairs in the private PNG grid
+  watch_pairs:                     # suspected shifted copy from the TASK-004 grid review
+    - [patches_193.jpg, patches_189.jpg]
+  pairs_file: data/splits/near_copy_pairs.csv     # `pairs` step, all splits; committed; read by split
+  pairs_summary: results/near_copies_summary.json # `pairs` step: calibration, counts, groups
+  out_csv: results/near_duplicates_cnn.csv        # `report` step: overlaps across data.split_file
+  out_summary: results/near_duplicates_cnn_summary.json
+  out_grid: results/private/near_duplicates_cnn_grid.png  # real NEU pixels: git-ignored (ADR-015)

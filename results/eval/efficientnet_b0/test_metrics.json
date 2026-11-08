@@ -1,0 +1,421 @@
+{
+  "model": "efficientnet_b0",
+  "role": "main",
+  "decision_record": "ADR-022",
+  "timm_model": "efficientnet_b0",
+  "split": "test_frozen",
+  "split_file": "neu_split_v2.csv",
+  "split_sha256": "f38cdd74a1437d512db8012edfd28f534687e17fe01dac1e21d56c747b3062ec",
+  "n_images": 360,
+  "classes": [
+    "crazing",
+    "inclusion",
+    "patches",
+    "pitted_surface",
+    "rolled-in_scale",
+    "scratches"
+  ],
+  "accuracy": {
+    "value": 0.9916666666666667,
+    "ci_low": 0.9806629834254144,
+    "ci_high": 1.0
+  },
+  "macro_f1": {
+    "value": 0.9917095403684417,
+    "ci_low": 0.9807881442642843,
+    "ci_high": 1.0
+  },
+  "n_errors": 3,
+  "per_class": {
+    "crazing": {
+      "support": 60,
+      "precision": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "f1": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      }
+    },
+    "inclusion": {
+      "support": 60,
+      "precision": {
+        "value": 0.9523809523809523,
+        "ci_low": 0.896551724137931,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "f1": {
+        "value": 0.975609756097561,
+        "ci_low": 0.9454545454545454,
+        "ci_high": 1.0
+      }
+    },
+    "patches": {
+      "support": 60,
+      "precision": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "f1": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      }
+    },
+    "pitted_surface": {
+      "support": 60,
+      "precision": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "value": 0.9666666666666667,
+        "ci_low": 0.9137931034482759,
+        "ci_high": 1.0
+      },
+      "f1": {
+        "value": 0.9830508474576272,
+        "ci_low": 0.954954954954955,
+        "ci_high": 1.0
+      }
+    },
+    "rolled-in_scale": {
+      "support": 60,
+      "precision": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "f1": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      }
+    },
+    "scratches": {
+      "support": 60,
+      "precision": {
+        "value": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "recall": {
+        "value": 0.9833333333333333,
+        "ci_low": 0.9464285714285714,
+        "ci_high": 1.0
+      },
+      "f1": {
+        "value": 0.9915966386554622,
+        "ci_low": 0.9724770642201835,
+        "ci_high": 1.0
+      }
+    }
+  },
+  "confusion_matrix": {
+    "rows": "true class",
+    "columns": "predicted",
+    "counts": [
+      [
+        60,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        60,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        60,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        2,
+        0,
+        58,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        60,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0,
+        0,
+        59
+      ]
+    ]
+  },
+  "bootstrap": {
+    "method": "cluster bootstrap stratified by class, percentile interval",
+    "unit": "confirmed near-copy group (ADR-021) or single image",
+    "n_units": 319,
+    "n_groups": 33,
+    "images_in_groups": 74,
+    "n_resamples": 10000,
+    "seed": 11,
+    "level": 0.95,
+    "note": "A metric with no errors in the test set has the interval [1, 1]: the bootstrap cannot show uncertainty it never sees."
+  },
+  "calibration": {
+    "temperature": 1.6424862981226587,
+    "source": "results/train/calibration.json",
+    "applied_only": "T was fitted on val (calibrate.py); nothing is fitted on test",
+    "n_images": 360,
+    "n_errors": 3,
+    "before": {
+      "ece": {
+        "value": 0.012527768479453203,
+        "ci_low": 0.004357037768368043,
+        "ci_high": 0.023512809124878842
+      },
+      "nll": {
+        "value": 0.05402502045035362,
+        "ci_low": 0.0062263423460535705,
+        "ci_high": 0.11580934878438712
+      },
+      "brier": {
+        "value": 0.01882277672555338,
+        "ci_low": 0.0024975738967307126,
+        "ci_high": 0.04014789760333667
+      }
+    },
+    "after": {
+      "ece": {
+        "value": 0.012280051078027777,
+        "ci_low": 0.00633233626636617,
+        "ci_high": 0.023352866325632823
+      },
+      "nll": {
+        "value": 0.04355178564002454,
+        "ci_low": 0.013824596360649992,
+        "ci_high": 0.08256054645968473
+      },
+      "brier": {
+        "value": 0.01966877934564733,
+        "ci_low": 0.0049729935253806186,
+        "ci_high": 0.03895787579260375
+      }
+    },
+    "change": {
+      "ece": {
+        "value": -0.0002477174014254256,
+        "ci_low": -0.002371889552277484,
+        "ci_high": 0.007633683054678638
+      },
+      "nll": {
+        "value": -0.01047323481032908,
+        "ci_low": -0.03393599866863532,
+        "ci_high": 0.007428559832980514
+      },
+      "brier": {
+        "value": 0.0008460026200939504,
+        "ci_low": -0.0016383548192760724,
+        "ci_high": 0.0030217361216911824
+      }
+    },
+    "verdict": {
+      "ece": "no clear change: the interval of the change includes 0",
+      "nll": "no clear change: the interval of the change includes 0",
+      "brier": "no clear change: the interval of the change includes 0"
+    },
+    "reliability_before": {
+      "n_bins": 15,
+      "count": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        2,
+        1,
+        1,
+        2,
+        1,
+        353
+      ],
+      "confidence": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        0.6257557570934296,
+        0.7174983620643616,
+        0.7526322603225708,
+        0.8221122324466705,
+        0.874580442905426,
+        0.9992930416344921
+      ],
+      "accuracy": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.9915014164305949
+      ]
+    },
+    "reliability_after": {
+      "n_bins": 15,
+      "count": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        2,
+        3,
+        1,
+        1,
+        4,
+        347
+      ],
+      "confidence": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        0.4987418300547613,
+        0.5863073243341295,
+        0.6478683843160629,
+        0.717141944598512,
+        0.7850409530267972,
+        0.8410335741669897,
+        0.9103022307124224,
+        0.9961101777777995
+      ],
+      "accuracy": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        1.0,
+        1.0,
+        0.9942363112391931
+      ]
+    },
+    "caution": "Only 3 of 360 images are misclassified, so NLL and ECE rest mostly on those few images; treat small changes as uncertain."
+  },
+  "review": {
+    "source": "results/train/threshold.json",
+    "decision_record": "ADR-023",
+    "applied_only": "threshold set on val (threshold.py); nothing is set on test",
+    "threshold": 0.8160653375842147,
+    "route_rule": "routed to review if calibrated confidence < threshold",
+    "n_images": 360,
+    "n_routed": 8,
+    "n_accepted": 352,
+    "routed_share": 0.022222222222222223,
+    "coverage": {
+      "value": 0.9777777777777777,
+      "ci_low": 0.9619875095347064,
+      "ci_high": 0.9916434540389972
+    },
+    "n_errors": 3,
+    "errors_routed": 1,
+    "errors_accepted": 2,
+    "risk": {
+      "value": 0.005681818181818182,
+      "ci_low": 0.0,
+      "ci_high": 0.014450867052023121
+    },
+    "risk_ucb": {
+      "value": 0.017776950935824157,
+      "level": 0.95,
+      "method": "one-sided Clopper-Pearson on images (assumes independent images)"
+    },
+    "risk_ucb_by_group": {
+      "value": 0.020040357191375927,
+      "n_units_accepted": 312,
+      "n_units_with_error": 2,
+      "note": "each near-copy group counted once; sensitivity check, not the stop check"
+    }
+  },
+  "provenance": {
+    "git_commit": "e5e3337a2a67d6ee257aa837f466f0939d3eac35",
+    "git_dirty": false,
+    "checkpoint_sha256": "108b03706b708404d7a013fa36a21ea51cced4c2f9321f097cc2c5147a8de1dd",
+    "train_run_uid": "85cc41e56aa54bd280f616fe8a87a441",
+    "results_dir": "results/train",
+    "device": "cpu",
+    "torch": "2.15.0+cpu",
+    "timm": "1.0.31"
+  }
+}

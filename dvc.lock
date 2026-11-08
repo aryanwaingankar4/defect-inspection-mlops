@@ -1,0 +1,298 @@
+schema: '2.0'
+stages:
+  split:
+    cmd: python -m src.data.split --config configs/params.yaml
+    deps:
+    - path: data/raw
+      hash: md5
+      md5: b59e5ed3116546542ea21654ca5732d1.dir
+      size: 28202290
+      nfiles: 3601
+    - path: data/splits/near_copy_pairs.csv
+      hash: md5
+      md5: a59daa18f7a55a84cb08e4e0e172438a
+      size: 149204
+    - path: src/config.py
+      hash: md5
+      md5: 9973d8c0af83b5904d61406884430143
+      size: 499
+    - path: src/data/download.py
+      hash: md5
+      md5: a7a1d924b420060959d5641ba16f5150
+      size: 5611
+    - path: src/data/groups.py
+      hash: md5
+      md5: bcf057bd7156f6fbd8a24ad36497e6f9
+      size: 2622
+    - path: src/data/split.py
+      hash: md5
+      md5: 04272c6dc508653cd3335aefdd2a8278
+      size: 7791
+    params:
+      configs/params.yaml:
+        data.raw_dir: data/raw
+        data.split_file: data/splits/neu_split_v2.csv
+        data.split_file_v1: data/splits/neu_split_v1.csv
+        near_duplicates_cnn.confirm_pixel_corr: 0.3
+        near_duplicates_cnn.pairs_file: data/splits/near_copy_pairs.csv
+        split.groups:
+          max_size_outside_last: 3
+        split.per_class:
+          train_v1: 25
+          val: 30
+          test_frozen: 60
+          production_stream: 185
+        split.seed: 42
+    outs:
+    - path: data/splits/neu_split_v1.csv
+      hash: md5
+      md5: 112fbbf79c941b6d551d827155591599
+      size: 140039
+    - path: data/splits/neu_split_v2.csv
+      hash: md5
+      md5: 1a086b4d4dc70284de5649dd2cc0cd1a
+      size: 140039
+  near_dups:
+    cmd: python -m src.data.near_duplicates --config configs/params.yaml
+    deps:
+    - path: data/raw
+      hash: md5
+      md5: b59e5ed3116546542ea21654ca5732d1.dir
+      size: 28202290
+      nfiles: 3601
+    - path: data/splits/neu_split_v2.csv
+      hash: md5
+      md5: 1a086b4d4dc70284de5649dd2cc0cd1a
+      size: 140039
+    - path: src/config.py
+      hash: md5
+      md5: 9973d8c0af83b5904d61406884430143
+      size: 499
+    - path: src/data/near_duplicates.py
+      hash: md5
+      md5: 8382ec2bffd1f79c105163b06dd2a838
+      size: 7975
+    - path: src/data/split.py
+      hash: md5
+      md5: 04272c6dc508653cd3335aefdd2a8278
+      size: 7791
+    params:
+      configs/params.yaml:
+        data.split_file: data/splits/neu_split_v2.csv
+        near_duplicates:
+          hash_size: 8
+          max_distance: 8
+          report_distances:
+          - 0
+          - 2
+          - 4
+          - 6
+          - 8
+          alert_distance: 2
+          grid_top_k: 12
+          out_csv: results/near_duplicates.csv
+          out_summary: results/near_duplicates_summary.json
+          out_grid: results/private/near_duplicates_grid.png
+    outs:
+    - path: results/near_duplicates.csv
+      hash: md5
+      md5: beb3f9bae8892688653ae813e51f99fb
+      size: 66
+    - path: results/near_duplicates_summary.json
+      hash: md5
+      md5: 002562ae1627c8e4fffa022412a1556d
+      size: 1506
+    - path: results/private/near_duplicates_grid.png
+      hash: md5
+      md5: 32c48095a83ce27a1550ca2926646eb1
+      size: 391332
+  near_copies:
+    cmd: python -m src.data.near_duplicates_cnn pairs --config 
+      configs/params.yaml
+    deps:
+    - path: data/raw
+      hash: md5
+      md5: b59e5ed3116546542ea21654ca5732d1.dir
+      size: 28202290
+      nfiles: 3601
+    - path: src/config.py
+      hash: md5
+      md5: 9973d8c0af83b5904d61406884430143
+      size: 499
+    - path: src/data/download.py
+      hash: md5
+      md5: a7a1d924b420060959d5641ba16f5150
+      size: 5611
+    - path: src/data/groups.py
+      hash: md5
+      md5: bcf057bd7156f6fbd8a24ad36497e6f9
+      size: 2622
+    - path: src/data/near_duplicates_cnn.py
+      hash: md5
+      md5: 6ab44c546e09da316e3f1f46af66c7e6
+      size: 25203
+    - path: src/data/split.py
+      hash: md5
+      md5: 04272c6dc508653cd3335aefdd2a8278
+      size: 7791
+    - path: src/serving/preprocess.py
+      hash: md5
+      md5: c4cda2f1413fc5e79a32248f651828f0
+      size: 3876
+    - path: src/training/train.py
+      hash: md5
+      md5: 10fc689a9b9e64966d08ae59c24549ff
+      size: 19097
+    params:
+      configs/params.yaml:
+        near_duplicates_cnn:
+          model: efficientnet_b0
+          batch_size: 32
+          seed: 7
+          report_cosines:
+          - 0.85
+          - 0.9
+          - 0.95
+          - 0.97
+          - 0.98
+          report_pixel_corrs:
+          - 0.2
+          - 0.3
+          - 0.5
+          - 0.7
+          - 0.9
+          candidate_cosine: 0.85
+          confirm_pixel_corr: 0.3
+          keep_pixel_corr: 0.1
+          highpass_px: 9
+          max_shift: 48
+          calib_same_class_pairs: 20000
+          calib_pixel_pairs: 5000
+          calib_shift_images_per_class: 30
+          calib_shifts:
+          - 8
+          - 16
+          - 32
+          max_candidates: 150000
+          summary_top_k: 20
+          grid_top_k: 24
+          watch_pairs:
+          - - patches_193.jpg
+            - patches_189.jpg
+          pairs_file: data/splits/near_copy_pairs.csv
+          pairs_summary: results/near_copies_summary.json
+          out_csv: results/near_duplicates_cnn.csv
+          out_summary: results/near_duplicates_cnn_summary.json
+          out_grid: results/private/near_duplicates_cnn_grid.png
+        preprocess:
+          image_size: 224
+          interpolation: bilinear
+          mean:
+          - 0.485
+          - 0.456
+          - 0.406
+          std:
+          - 0.229
+          - 0.224
+          - 0.225
+    outs:
+    - path: data/splits/near_copy_pairs.csv
+      hash: md5
+      md5: a59daa18f7a55a84cb08e4e0e172438a
+      size: 149204
+    - path: results/near_copies_summary.json
+      hash: md5
+      md5: 95201580f46bb765455efd1666991028
+      size: 10262
+  near_dups_cnn:
+    cmd: python -m src.data.near_duplicates_cnn report --config 
+      configs/params.yaml --require-clean
+    deps:
+    - path: data/raw
+      hash: md5
+      md5: b59e5ed3116546542ea21654ca5732d1.dir
+      size: 28202290
+      nfiles: 3601
+    - path: data/splits/near_copy_pairs.csv
+      hash: md5
+      md5: a59daa18f7a55a84cb08e4e0e172438a
+      size: 149204
+    - path: data/splits/neu_split_v2.csv
+      hash: md5
+      md5: 1a086b4d4dc70284de5649dd2cc0cd1a
+      size: 140039
+    - path: results/near_copies_summary.json
+      hash: md5
+      md5: 95201580f46bb765455efd1666991028
+      size: 10262
+    - path: src/config.py
+      hash: md5
+      md5: 9973d8c0af83b5904d61406884430143
+      size: 499
+    - path: src/data/groups.py
+      hash: md5
+      md5: bcf057bd7156f6fbd8a24ad36497e6f9
+      size: 2622
+    - path: src/data/near_duplicates_cnn.py
+      hash: md5
+      md5: 6ab44c546e09da316e3f1f46af66c7e6
+      size: 25203
+    - path: src/data/split.py
+      hash: md5
+      md5: 04272c6dc508653cd3335aefdd2a8278
+      size: 7791
+    params:
+      configs/params.yaml:
+        data.split_file: data/splits/neu_split_v2.csv
+        near_duplicates_cnn:
+          model: efficientnet_b0
+          batch_size: 32
+          seed: 7
+          report_cosines:
+          - 0.85
+          - 0.9
+          - 0.95
+          - 0.97
+          - 0.98
+          report_pixel_corrs:
+          - 0.2
+          - 0.3
+          - 0.5
+          - 0.7
+          - 0.9
+          candidate_cosine: 0.85
+          confirm_pixel_corr: 0.3
+          keep_pixel_corr: 0.1
+          highpass_px: 9
+          max_shift: 48
+          calib_same_class_pairs: 20000
+          calib_pixel_pairs: 5000
+          calib_shift_images_per_class: 30
+          calib_shifts:
+          - 8
+          - 16
+          - 32
+          max_candidates: 150000
+          summary_top_k: 20
+          grid_top_k: 24
+          watch_pairs:
+          - - patches_193.jpg
+            - patches_189.jpg
+          pairs_file: data/splits/near_copy_pairs.csv
+          pairs_summary: results/near_copies_summary.json
+          out_csv: results/near_duplicates_cnn.csv
+          out_summary: results/near_duplicates_cnn_summary.json
+          out_grid: results/private/near_duplicates_cnn_grid.png
+    outs:
+    - path: results/near_duplicates_cnn.csv
+      hash: md5
+      md5: c45922033804378abf8007a175cc7364
+      size: 64248
+    - path: results/near_duplicates_cnn_summary.json
+      hash: md5
+      md5: 723003711bfe32f8537c77d7e3faef52
+      size: 8431
+    - path: results/private/near_duplicates_cnn_grid.png
+      hash: md5
+      md5: 07267d16654f23fb358f8c40008a701d
+      size: 706553

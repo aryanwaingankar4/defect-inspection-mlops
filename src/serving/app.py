@@ -25,12 +25,12 @@ from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
     CollectorRegistry,
@@ -87,12 +87,46 @@ class PredictResponse(BaseModel):
     calibrated_confidence: float = Field(description="max softmax(logits / T), ADR-006/025")
     energy: float = Field(description="-T * logsumexp(logits / T); higher = less familiar")
     routed_to_review: bool
-    reasons: list[str] = Field(description="low_confidence and/or ood (ADR-023, ADR-027)")
+    reasons: list[Literal["low_confidence", "ood"]] = Field(
+        description="why the image goes to review (ADR-023, ADR-027); empty if it does not"
+    )
     model_version: str
     model: ModelInfo
     thresholds: ThresholdInfo
     image_sha256: str
     latency_ms: float
+
+
+class ErrorResponse(BaseModel):
+    """Body of every 4xx/5xx answer."""
+
+    error: str = Field(description="short machine-readable code, e.g. near_blank")
+    detail: str
+    request_id: str
+
+
+class HealthResponse(BaseModel):
+    """``model``, ``bundle_built_at`` and ``database`` are present once the model is loaded."""
+
+    status: Literal["ok", "degraded", "not_ready"]
+    model: ModelInfo | None = None
+    bundle_built_at: str | None = None
+    database: Literal["ok", "unavailable"] | None = None
+
+
+def error_docs(*codes: int) -> dict[int | str, dict[str, Any]]:
+    """OpenAPI entries for the error answers an endpoint can give (all use ``ErrorResponse``)."""
+    text = {
+        401: "X-API-Key header missing",
+        403: "X-API-Key wrong",
+        411: "Content-Length missing",
+        413: "file too large",
+        415: "image format not allowed",
+        422: "invalid request or image (undecodable, too small, too many pixels, near blank)",
+        500: "unexpected error",
+        503: "model not loaded or prediction could not be logged",
+    }
+    return {c: {"model": ErrorResponse, "description": text[c]} for c in codes}
 
 
 class FeedbackRequest(BaseModel):
@@ -366,27 +400,34 @@ def create_app(
             raise ApiError(503, "not_ready", "the model is not loaded")
         return bundle
 
-    @app.get("/health")
+    @app.get(
+        "/health",
+        response_model=HealthResponse,
+        responses={503: {"model": HealthResponse, "description": "not ready or degraded"}},
+    )
     def health(request: Request) -> JSONResponse:
         bundle, db = request.app.state.bundle, request.app.state.db
         if bundle is None or db is None:
-            return JSONResponse({"status": "not_ready"}, status_code=503)
+            body = HealthResponse(status="not_ready")
+            return JSONResponse(body.model_dump(exclude_none=True), status_code=503)
         db_ok = db.ping()
-        return JSONResponse(
-            {
-                "status": "ok" if db_ok else "degraded",
-                "model": bundle.model_info,
-                "bundle_built_at": bundle.manifest["built_at"],
-                "database": "ok" if db_ok else "unavailable",
-            },
-            status_code=200 if db_ok else 503,
+        body = HealthResponse(
+            status="ok" if db_ok else "degraded",
+            model=ModelInfo(**bundle.model_info),
+            bundle_built_at=bundle.manifest["built_at"],
+            database="ok" if db_ok else "unavailable",
         )
+        return JSONResponse(body.model_dump(exclude_none=True), status_code=200 if db_ok else 503)
 
-    @app.get("/metrics")
+    @app.get("/metrics", response_class=PlainTextResponse)
     def prometheus() -> Response:
         return Response(generate_latest(metrics.registry), media_type=CONTENT_TYPE_LATEST)
 
-    @app.post("/predict", response_model=PredictResponse)
+    @app.post(
+        "/predict",
+        response_model=PredictResponse,
+        responses=error_docs(401, 403, 411, 413, 415, 422, 500, 503),
+    )
     def predict(request: Request, file: UploadFile = File(...)) -> PredictResponse:  # noqa: B008
         start = time.perf_counter()
         bundle = ready_bundle(request)
@@ -443,7 +484,12 @@ def create_app(
             latency_ms=latency_ms,
         )
 
-    @app.post("/feedback", status_code=202, response_model=FeedbackResponse)
+    @app.post(
+        "/feedback",
+        status_code=202,
+        response_model=FeedbackResponse,
+        responses=error_docs(401, 403, 422, 500, 503),
+    )
     def feedback(request: Request, body: FeedbackRequest) -> FeedbackResponse:
         bundle = ready_bundle(request)
         if body.label not in bundle.classes:

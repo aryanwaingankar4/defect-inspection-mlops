@@ -18,7 +18,7 @@ RAW_DIR := data/raw
 PARAMS := configs/params.yaml
 
 .PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
-	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve register kaggle-dataset kaggle-push kaggle-status kaggle-output
+	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot register kaggle-dataset kaggle-push kaggle-status kaggle-output
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -105,6 +105,12 @@ serving-bundle: ## Download the @champion serving ONNX + tags into models/servin
 
 serve: ## Run the API on http://127.0.0.1:8000 from models/serving/ (API_KEY from .env; ADR-028)
 	$(RUN_SERVE) $(ENV_FILE) python -m src.serving.app --config $(PARAMS) $(ARGS)
+
+golden: ## Golden images + expected @champion outputs -> tests/golden/ (needs bundle + NEU val; ADR-017)
+	$(RUN_SERVE) python -m src.serving.golden --config $(PARAMS)
+
+openapi-snapshot: ## Rewrite the API contract tests/contract/openapi.json (only for an intended API change)
+	$(RUN_SERVE) python -m src.serving.contract --config $(PARAMS)
 
 champion: ## Set the first @champion with linked evidence (ADR-024). Dry run; ARGS=--apply writes
 	$(RUN_TRAIN) $(ENV_FILE) python -m src.tracking.promote --config $(PARAMS) $(ARGS)

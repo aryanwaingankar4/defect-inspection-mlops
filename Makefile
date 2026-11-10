@@ -16,9 +16,11 @@ FAST_TESTS := not slow and not manual and not needs_data and not needs_model
 NEU_DATASET := kaustubhdikshit/neu-surface-defect-database/1
 RAW_DIR := data/raw
 PARAMS := configs/params.yaml
+IMAGE := defect-inspection-api:local
+MANIFEST := models/serving/manifest.json
 
 .PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
-	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot register kaggle-dataset kaggle-push kaggle-status kaggle-output
+	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke register kaggle-dataset kaggle-push kaggle-status kaggle-output
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -105,6 +107,22 @@ serving-bundle: ## Download the @champion serving ONNX + tags into models/servin
 
 serve: ## Run the API on http://127.0.0.1:8000 from models/serving/ (API_KEY from .env; ADR-028)
 	$(RUN_SERVE) $(ENV_FILE) python -m src.serving.app --config $(PARAMS) $(ARGS)
+
+docker-build: ## Build the API image with the serving bundle inside (needs `make serving-bundle`; TASK-021)
+	@test -f $(MANIFEST) || { echo "missing $(MANIFEST): run 'make serving-bundle' first"; exit 1; }
+	docker build -t $(IMAGE) \
+		--build-arg MODEL_VERSION=$$($(RUN) python -c "import json; print(json.load(open('$(MANIFEST)'))['version'])") \
+		--build-arg ONNX_SHA256=$$($(RUN) python -c "import json; print(json.load(open('$(MANIFEST)'))['onnx_sha256'])") \
+		--build-arg GIT_COMMIT=$$(git rev-parse --short HEAD) .
+
+docker-up: docker-build ## Run the API in Docker on http://127.0.0.1:8000 (API_KEY from .env; log on a volume)
+	docker compose up -d --no-build
+
+docker-down: ## Stop the Docker stack (the prediction-log volume is kept)
+	docker compose down
+
+docker-smoke: docker-build ## Build, start and check the API container, then remove it (synthetic image only)
+	$(RUN) python scripts/docker_smoke.py
 
 golden: ## Golden images + expected @champion outputs -> tests/golden/ (needs bundle + NEU val; ADR-017)
 	$(RUN_SERVE) python -m src.serving.golden --config $(PARAMS)

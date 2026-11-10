@@ -1,0 +1,13 @@
+# Allowlist (TASK-021): send nothing to the Docker build except what the API image copies.
+# Never data/ (NEU images, ADR-015), .env (secrets), results/, mlruns/ or other model files.
+*
+!pyproject.toml
+!uv.lock
+!src/__init__.py
+!src/config.py
+!src/db/
+!src/serving/
+!configs/params.yaml
+!models/serving/
+**/__pycache__
+**/*.pyc

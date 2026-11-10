@@ -296,3 +296,27 @@ def add_to_finished_run(
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def version_by_alias(cfg: TrackingConfig, alias: str) -> dict[str, Any] | None:
+    """Version number, run id and tags of ``registered_model@alias`` (None if not set)."""
+    client = mlflow.MlflowClient(tracking_uri=resolve_tracking_uri(cfg.local_uri))
+    try:
+        mv = client.get_model_version_by_alias(cfg.registered_model, alias)
+    except mlflow.exceptions.MlflowException:
+        return None
+    return {"version": str(mv.version), "run_id": mv.run_id, "tags": dict(mv.tags)}
+
+
+def set_version_tags(cfg: TrackingConfig, version: str, tags: Mapping[str, Any]) -> None:
+    """Add tags to one registered version (text only)."""
+    client = mlflow.MlflowClient(tracking_uri=resolve_tracking_uri(cfg.local_uri))
+    for key, value in tags.items():
+        client.set_model_version_tag(cfg.registered_model, version, key, str(value))
+
+
+def download_run_artifact(cfg: TrackingConfig, run_id: str, artifact: str, dst: Path) -> Path:
+    """Download one artifact of a run into ``dst``; returns the local path."""
+    client = mlflow.MlflowClient(tracking_uri=resolve_tracking_uri(cfg.local_uri))
+    dst.mkdir(parents=True, exist_ok=True)
+    return Path(client.download_artifacts(run_id, artifact, str(dst)))

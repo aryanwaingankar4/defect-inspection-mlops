@@ -1,0 +1,112 @@
+{
+  "decision_record": "ADR-017",
+  "synthetic_image": {
+    "file": "synthetic_golden.png",
+    "pixels_sha256": "5c2a53cc5b6597c1d8b3c2c4a103e3539a3879bfe811f58a9b0ade2b327e9d37",
+    "tensor": {
+      "shape": [
+        3,
+        224,
+        224
+      ],
+      "channel_mean": [
+        0.07663381099700928,
+        0.2078087329864502,
+        0.4291074275970459
+      ],
+      "channel_std": [
+        0.4259498119354248,
+        0.43545761704444885,
+        0.4335222840309143
+      ],
+      "samples": {
+        "0,0,0": -0.4910523295402527,
+        "0,37,151": -1.004794955253601,
+        "0,112,112": 0.45080918073654175,
+        "0,223,5": 0.5193082094192505,
+        "1,0,0": -0.3725489675998688,
+        "1,37,151": -0.8977590203285217,
+        "1,112,112": 0.5903362035751343,
+        "1,223,5": 0.6603642106056213,
+        "2,0,0": -0.14867094159126282,
+        "2,37,151": -0.6715467572212219,
+        "2,112,112": 0.8099347949028015,
+        "2,223,5": 0.8796516060829163
+      }
+    }
+  },
+  "tolerance": {
+    "atol": 0.0001,
+    "rtol": 0.0001
+  },
+  "champion": {
+    "registered_model": "steel-defect-classifier",
+    "version": "2",
+    "precision": "fp32",
+    "onnx_sha256": "d49370a4d8e5161ef5aa50660db431734750e1815a1eb3a3972da2923400cb1f",
+    "temperature": 1.6424862981226587,
+    "review_threshold": 0.8160653375842147,
+    "ood_energy_threshold": -6.1445646940236704,
+    "images": [
+      {
+        "id": "synthetic",
+        "source": "synthetic_golden.png",
+        "image_sha256": "07dd69353cdebb6e212cc55e153d6b00144047b353cbcedec1c9cb12de9f9f92",
+        "prediction": "pitted_surface",
+        "calibrated_confidence": 0.5399684617825066,
+        "energy": -7.243022011057837,
+        "routed_to_review": true,
+        "reasons": [
+          "low_confidence"
+        ],
+        "logits": [
+          0.9480758309364319,
+          3.5547008514404297,
+          -3.5926880836486816,
+          6.230848789215088,
+          -2.4665942192077637,
+          5.4142680168151855
+        ]
+      },
+      {
+        "id": "val_first",
+        "source": "NEU-DET/train/images/crazing/crazing_130.jpg",
+        "image_sha256": "79cef251160019422e3e4fec09c37bb0376574018990d604c505188f50e879c3",
+        "prediction": "crazing",
+        "calibrated_confidence": 0.9897868505354686,
+        "energy": -10.032250650837911,
+        "routed_to_review": false,
+        "reasons": [],
+        "logits": [
+          10.015389442443848,
+          0.5482773780822754,
+          -0.21035170555114746,
+          0.9506042003631592,
+          -1.5264906883239746,
+          -3.284929037094116
+        ]
+      },
+      {
+        "id": "val_lowest_confidence",
+        "source": "NEU-DET/train/images/scratches/scratches_84.jpg",
+        "image_sha256": "0e25a596a7ddcb6b78b1f608c01a9ab168748556ee87e7feb2293ce3de87cd78",
+        "prediction": "scratches",
+        "calibrated_confidence": 0.36501600735880363,
+        "energy": -5.29587427641528,
+        "routed_to_review": true,
+        "reasons": [
+          "low_confidence",
+          "ood"
+        ],
+        "logits": [
+          1.4743258953094482,
+          2.629596710205078,
+          3.4240195751190186,
+          -3.9786036014556885,
+          -1.4296241998672485,
+          3.6405534744262695
+        ]
+      }
+    ]
+  }
+}

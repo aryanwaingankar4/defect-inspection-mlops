@@ -86,7 +86,8 @@ def test_no_images_tracked_in_git() -> None:
 
 def is_forbidden_image(path: str) -> bool:
     """Dataset-like images (.jpg/.bmp/...) are never committed. PNG is allowed only for plots
-    in results/, never in results/private/ (real NEU pixels)."""
+    in results/, never in results/private/ (real NEU pixels), and for the formula-made golden
+    images ``tests/golden/synthetic_*.png`` (ADR-017; test_golden.py proves their pixels)."""
     p = Path(path)
     suffix = p.suffix.lower()
     if suffix not in dl.IMAGE_SUFFIXES:
@@ -94,6 +95,8 @@ def is_forbidden_image(path: str) -> bool:
     if suffix != ".png":
         return True
     parts = p.parts
+    if parts[:2] == ("tests", "golden") and len(parts) == 3 and p.name.startswith("synthetic_"):
+        return False
     return not (len(parts) > 1 and parts[0] == "results" and parts[1] != "private")
 
 
@@ -101,6 +104,11 @@ def is_forbidden_image(path: str) -> bool:
     ("path", "forbidden"),
     [
         ("data/raw/NEU-DET/a.jpg", True),
+        ("tests/golden/synthetic_golden.png", False),
+        ("tests/golden/crazing_130.png", True),
+        ("tests/golden/sub/synthetic_x.png", True),
+        ("tests/golden/synthetic_golden.jpg", True),
+        ("tests/fixtures/synthetic_golden.png", True),
         ("results/sample.jpg", True),
         ("docs/figure.bmp", True),
         ("docs/diagram.png", True),

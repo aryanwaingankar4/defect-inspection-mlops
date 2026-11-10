@@ -46,7 +46,9 @@ Show a complete, trustworthy production loop for a vision model. The loop is: se
 - Rollback restores the previous `@champion`.
 - Drift is detected on the shifted streams. The false-alarm rate on the clean stream is reported.
 - A public Azure URL serves predictions; deploy runs automatically from `main`.
-- A stranger can run the demo from the README.
+- A stranger can run the demo from the README; a 2-minute demo video walks through the loop.
+- A load test against the public Azure URL is recorded in `results/`.
+- On X-SDD (a second steel dataset), the share of unseen-class images routed to review is reported.
 - Every number in the README and resume comes from a file in `results/`.
 
 ## Constraints

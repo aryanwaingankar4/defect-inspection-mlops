@@ -4,6 +4,8 @@
 RUN := uv run --locked
 # Training deps (torch, timm, matplotlib) live in the `train` group.
 RUN_TRAIN := uv run --locked --group train
+# The API needs only the serve group (ONNX Runtime, FastAPI; no torch, no mlflow).
+RUN_SERVE := uv run --locked --group serve
 # Publishing to MLflow loads secrets (DagsHub) from .env if it exists. Training and tests never do.
 ENV_FILE := $(if $(wildcard .env),--env-file .env,)
 
@@ -14,9 +16,11 @@ FAST_TESTS := not slow and not manual and not needs_data and not needs_model
 NEU_DATASET := kaustubhdikshit/neu-surface-defect-database/1
 RAW_DIR := data/raw
 PARAMS := configs/params.yaml
+IMAGE := defect-inspection-api:local
+MANIFEST := models/serving/manifest.json
 
 .PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
-	compare-val calibrate threshold evaluate champion register kaggle-dataset kaggle-push kaggle-status kaggle-output
+	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke register kaggle-dataset kaggle-push kaggle-status kaggle-output
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -36,10 +40,10 @@ format: ## Auto-fix lint issues and format code
 	$(RUN) ruff format .
 
 test: ## Fast tests (skips slow, manual, needs_data, needs_model)
-	$(RUN_TRAIN) pytest -m "$(FAST_TESTS)"
+	$(RUN_TRAIN) --group serve pytest -m "$(FAST_TESTS)"
 
 test-all: ## All tests, including slow / manual / needs_data / needs_model
-	$(RUN_TRAIN) pytest
+	$(RUN_TRAIN) --group serve pytest
 
 check: lint test ## Lint + fast tests (what CI runs)
 
@@ -86,8 +90,45 @@ calibrate: ## Temperature scaling on val for both models (CPU; ADR-006). ARGS: -
 threshold: ## Review threshold on val for the main model (CPU; ADR-023). ARGS: --log-mlflow
 	$(RUN_TRAIN) $(ENV_FILE) python -m src.training.threshold --config $(PARAMS) $(ARGS)
 
+ood: ## Energy OOD threshold on val + synthetic non-steel evaluation (ADR-027). ARGS: --log-mlflow
+	$(RUN_TRAIN) $(ENV_FILE) python -m src.training.ood --config $(PARAMS) $(ARGS)
+
 evaluate: ## Both models on test_frozen -> results/eval/ (CPU; after compare-val, ADR-022). ARGS: --log-mlflow
 	$(RUN_TRAIN) $(ENV_FILE) python -m src.training.evaluate --config $(PARAMS) $(ARGS)
+
+export-onnx: ## FP32 ONNX of @champion + parity on val (CPU; ADR-025). ARGS: --log-mlflow
+	$(RUN_TRAIN) $(ENV_FILE) python -m src.training.export_onnx --config $(PARAMS) $(ARGS)
+
+quantize: ## Static INT8 QDQ of the champion ONNX + FP32 vs INT8 on val (ADR-026). ARGS: --log-mlflow
+	$(RUN_TRAIN) $(ENV_FILE) python -m src.training.quantize --config $(PARAMS) $(ARGS)
+
+serving-bundle: ## Download the @champion serving ONNX + tags into models/serving/ (read-only; ADR-028)
+	$(RUN_TRAIN) $(ENV_FILE) python -m src.tracking.serving_bundle --config $(PARAMS)
+
+serve: ## Run the API on http://127.0.0.1:8000 from models/serving/ (API_KEY from .env; ADR-028)
+	$(RUN_SERVE) $(ENV_FILE) python -m src.serving.app --config $(PARAMS) $(ARGS)
+
+docker-build: ## Build the API image with the serving bundle inside (needs `make serving-bundle`; TASK-021)
+	@test -f $(MANIFEST) || { echo "missing $(MANIFEST): run 'make serving-bundle' first"; exit 1; }
+	docker build -t $(IMAGE) \
+		--build-arg MODEL_VERSION=$$($(RUN) python -c "import json; print(json.load(open('$(MANIFEST)'))['version'])") \
+		--build-arg ONNX_SHA256=$$($(RUN) python -c "import json; print(json.load(open('$(MANIFEST)'))['onnx_sha256'])") \
+		--build-arg GIT_COMMIT=$$(git rev-parse --short HEAD) .
+
+docker-up: docker-build ## Run the API in Docker on http://127.0.0.1:8000 (API_KEY from .env; log on a volume)
+	docker compose up -d --no-build
+
+docker-down: ## Stop the Docker stack (the prediction-log volume is kept)
+	docker compose down
+
+docker-smoke: docker-build ## Build, start and check the API container, then remove it (synthetic image only)
+	$(RUN) python scripts/docker_smoke.py
+
+golden: ## Golden images + expected @champion outputs -> tests/golden/ (needs bundle + NEU val; ADR-017)
+	$(RUN_SERVE) python -m src.serving.golden --config $(PARAMS)
+
+openapi-snapshot: ## Rewrite the API contract tests/contract/openapi.json (only for an intended API change)
+	$(RUN_SERVE) python -m src.serving.contract --config $(PARAMS)
 
 champion: ## Set the first @champion with linked evidence (ADR-024). Dry run; ARGS=--apply writes
 	$(RUN_TRAIN) $(ENV_FILE) python -m src.tracking.promote --config $(PARAMS) $(ARGS)

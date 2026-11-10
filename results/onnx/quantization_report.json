@@ -1,0 +1,210 @@
+{
+  "decision_record": "ADR-026",
+  "registered_model": "steel-defect-classifier",
+  "version": "2",
+  "alias": "champion",
+  "run_id": "6895c4fd4cae49c384e019d85eaee471",
+  "fp32_file": "models/onnx/steel-defect-classifier-v2.fp32.onnx",
+  "fp32_sha256": "d49370a4d8e5161ef5aa50660db431734750e1815a1eb3a3972da2923400cb1f",
+  "int8_file": "models/onnx/steel-defect-classifier-v2.int8.onnx",
+  "int8_sha256": "8dc29eb78386469030459398d582d03d593c31d797dac1b5aa8010c7085a1e1f",
+  "bytes": {
+    "fp32": 16543323,
+    "int8": 5175095
+  },
+  "settings": {
+    "pre_process": "onnxruntime.quantization.shape_inference.quant_pre_process",
+    "format": "QDQ",
+    "per_channel": true,
+    "activation_type": "QInt8",
+    "weight_type": "QInt8",
+    "reduce_range": false,
+    "calibrate_method": "MinMax",
+    "calibration_split": "train_v1",
+    "calibration_images": 150
+  },
+  "compared_on": "val",
+  "n_images": 180,
+  "classes": [
+    "crazing",
+    "inclusion",
+    "patches",
+    "pitted_surface",
+    "rolled-in_scale",
+    "scratches"
+  ],
+  "fp32": {
+    "accuracy": 0.9777777777777777,
+    "macro_f1": 0.9779568398629248,
+    "n_errors": 4,
+    "per_class": {
+      "crazing": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "inclusion": {
+        "precision": 0.9354838709677419,
+        "recall": 0.9666666666666667,
+        "f1": 0.9508196721311475
+      },
+      "patches": {
+        "precision": 1.0,
+        "recall": 0.9666666666666667,
+        "f1": 0.9830508474576272
+      },
+      "pitted_surface": {
+        "precision": 1.0,
+        "recall": 0.9666666666666667,
+        "f1": 0.9830508474576272
+      },
+      "rolled-in_scale": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "scratches": {
+        "precision": 0.9354838709677419,
+        "recall": 0.9666666666666667,
+        "f1": 0.9508196721311475
+      }
+    },
+    "ece": 0.015444459249515706,
+    "routing": {
+      "n_routed": 9,
+      "errors_routed": 3,
+      "errors_accepted": 1,
+      "risk": 0.005847953216374269,
+      "risk_ucb": 0.027440050957961152
+    }
+  },
+  "int8": {
+    "accuracy": 0.4722222222222222,
+    "macro_f1": 0.4264052638173681,
+    "n_errors": 95,
+    "per_class": {
+      "crazing": {
+        "precision": 0.5111111111111111,
+        "recall": 0.7666666666666667,
+        "f1": 0.6133333333333333
+      },
+      "inclusion": {
+        "precision": 0.30612244897959184,
+        "recall": 1.0,
+        "f1": 0.46875
+      },
+      "patches": {
+        "precision": 0.9411764705882353,
+        "recall": 0.5333333333333333,
+        "f1": 0.6808510638297872
+      },
+      "pitted_surface": {
+        "precision": 0.6666666666666666,
+        "recall": 0.2,
+        "f1": 0.3076923076923077
+      },
+      "rolled-in_scale": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "scratches": {
+        "precision": 0.9090909090909091,
+        "recall": 0.3333333333333333,
+        "f1": 0.4878048780487805
+      }
+    },
+    "ece": 0.3435039043814499,
+    "routing": {
+      "n_routed": 71,
+      "errors_routed": 50,
+      "errors_accepted": 45,
+      "risk": 0.41284403669724773,
+      "risk_ucb": 0.49607996791207504
+    }
+  },
+  "agreement": {
+    "same_class": 86,
+    "same_routing": 102,
+    "max_abs_logit_change": 35.65191888809204,
+    "mean_abs_logit_change": 6.956802711553044,
+    "max_abs_calibrated_confidence_change": 0.6737454712325597
+  },
+  "applied_with": {
+    "temperature": 1.6424862981226587,
+    "review_threshold": 0.8160653375842147
+  },
+  "rule": {
+    "decision_record": "ADR-026",
+    "class_f1_drop": {
+      "crazing": 0.3866666666666667,
+      "inclusion": 0.4820696721311475,
+      "patches": 0.30219978362783995,
+      "pitted_surface": 0.6753585397653195,
+      "rolled-in_scale": 1.0,
+      "scratches": 0.463014794082367
+    },
+    "checks": {
+      "max_class_f1_drop": {
+        "value": 1.0,
+        "limit": 0.02,
+        "worst_class": "rolled-in_scale",
+        "passed": false
+      },
+      "macro_f1_drop": {
+        "value": 0.5515515760455567,
+        "limit": 0.01,
+        "passed": false
+      },
+      "int8_risk_ucb": {
+        "value": 0.49607996791207504,
+        "limit": 0.05,
+        "passed": false
+      }
+    },
+    "passed": false,
+    "serving_precision": "fp32"
+  },
+  "serving_precision": "fp32",
+  "latency_cpu": {
+    "note": "rough: one laptop CPU, single process; the load benchmark is TASK-022",
+    "fp32": [
+      {
+        "batch": 1,
+        "median_ms": 37.2693000244908,
+        "p90_ms": 45.978489983826876,
+        "median_ms_per_image": 37.2693000244908
+      },
+      {
+        "batch": 32,
+        "median_ms": 807.6385500025935,
+        "p90_ms": 1473.9349100040272,
+        "median_ms_per_image": 25.23870468758105
+      }
+    ],
+    "int8": [
+      {
+        "batch": 1,
+        "median_ms": 108.58940001344308,
+        "p90_ms": 117.2698300157208,
+        "median_ms_per_image": 108.58940001344308
+      },
+      {
+        "batch": 32,
+        "median_ms": 2508.7283499888144,
+        "p90_ms": 3672.755549993599,
+        "median_ms_per_image": 78.39776093715045
+      }
+    ]
+  },
+  "caution": "180 val images and 4 FP32 errors: the rule can only catch large damage; passing means no visible loss on val, not equality with FP32.",
+  "versions": {
+    "onnx": "1.23.2",
+    "onnxruntime": "1.31.1"
+  },
+  "provenance": {
+    "git_commit": "cff12843f2c8791d5d6724ce05b85f484e8164b4",
+    "git_dirty": false,
+    "device": "cpu"
+  }
+}

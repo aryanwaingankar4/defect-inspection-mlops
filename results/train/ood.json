@@ -1,0 +1,246 @@
+{
+  "decision_record": "ADR-027",
+  "registered_model": "steel-defect-classifier",
+  "version": "2",
+  "alias": "champion",
+  "run_id": "6895c4fd4cae49c384e019d85eaee471",
+  "ood_energy_threshold": -6.1445646940236704,
+  "score": "energy = -T * logsumexp(logits / T); flagged if energy > threshold",
+  "route_rule": "review if calibrated confidence < review_threshold OR energy > threshold",
+  "rule": {
+    "id_flag_budget": 0.02,
+    "choice": "ceil(budget * n) highest val energies flagged; midpoint threshold"
+  },
+  "temperature": 1.6424862981226587,
+  "review_threshold": 0.8160653375842147,
+  "serving_precision": "fp32",
+  "serving_onnx_file": "models/onnx/steel-defect-classifier-v2.fp32.onnx",
+  "serving_onnx_sha256": "d49370a4d8e5161ef5aa50660db431734750e1815a1eb3a3972da2923400cb1f",
+  "calibration_sha256": "7edd68bc65ccfaf1af1951ec5f915092f708564b6fb8d9adf40596a171576b3e",
+  "fitted_on": {
+    "split": "val",
+    "split_file": "neu_split_v2.csv",
+    "split_sha256": "f38cdd74a1437d512db8012edfd28f534687e17fe01dac1e21d56c747b3062ec",
+    "n_images": 180
+  },
+  "val": {
+    "n_images": 180,
+    "n_errors": 4,
+    "ood_threshold": -6.1445646940236704,
+    "flagged_ood": 4,
+    "routed_low_confidence": 9,
+    "routed_both_reasons": 1,
+    "routed_ood_only": 3,
+    "routed_any_reason": 12,
+    "routed_share": 0.06666666666666667,
+    "errors_routed_any_reason": 3,
+    "errors_flagged_ood": 0,
+    "low_confidence_only": {
+      "n_accepted": 171,
+      "errors_accepted": 1,
+      "risk_ucb": 0.027440050957961152
+    },
+    "combined_rule": {
+      "n_accepted": 168,
+      "errors_accepted": 1,
+      "risk_ucb": 0.02792459943236708
+    },
+    "ucb_level": 0.95,
+    "ood_threshold_interval": {
+      "ci_low": -7.513161724532092,
+      "ci_high": -5.29587427641528,
+      "level": 0.95,
+      "note": "98% quantile of val energy on grouped bootstrap resamples (approximation)"
+    }
+  },
+  "synthetic": {
+    "note": "generated in code (src/data/synthetic_ood.py); no NEU pixels; evaluation only",
+    "seed": 23,
+    "n_per_family": 50,
+    "detection_level": 0.95,
+    "fpr_at_tpr": 0.95,
+    "pooled": {
+      "n": 400,
+      "flagged_ood": 322,
+      "flagged_share": 0.805,
+      "flagged_share_lower_bound": 0.7695195545840119,
+      "routed_any_reason": 355,
+      "routed_share": 0.8875,
+      "auroc_energy": 0.9715277777777778,
+      "fpr_at_tpr_energy": 0.1,
+      "auroc_energy_t1_reference": 0.9725277777777778,
+      "auroc_confidence_reference": 0.9662916666666667
+    },
+    "per_family": {
+      "gaussian_noise": {
+        "n": 50,
+        "flagged_ood": 43,
+        "flagged_share": 0.86,
+        "flagged_share_lower_bound": 0.7530647982687907,
+        "routed_any_reason": 44,
+        "routed_share": 0.88,
+        "auroc_energy": 0.9166666666666666,
+        "fpr_at_tpr_energy": 1.0,
+        "auroc_energy_t1_reference": 0.9173333333333333,
+        "auroc_confidence_reference": 0.9257777777777778,
+        "predicted_as": {
+          "inclusion": 43,
+          "scratches": 3,
+          "crazing": 3,
+          "patches": 1
+        }
+      },
+      "uniform_noise": {
+        "n": 50,
+        "flagged_ood": 44,
+        "flagged_share": 0.88,
+        "flagged_share_lower_bound": 0.7768300102995561,
+        "routed_any_reason": 49,
+        "routed_share": 0.98,
+        "auroc_energy": 0.9901111111111112,
+        "fpr_at_tpr_energy": 0.044444444444444446,
+        "auroc_energy_t1_reference": 0.9913333333333333,
+        "auroc_confidence_reference": 0.9786666666666667,
+        "predicted_as": {
+          "inclusion": 19,
+          "patches": 14,
+          "crazing": 10,
+          "scratches": 5,
+          "rolled-in_scale": 2
+        }
+      },
+      "gradient": {
+        "n": 50,
+        "flagged_ood": 50,
+        "flagged_share": 1.0,
+        "flagged_share_lower_bound": 0.9418449208830277,
+        "routed_any_reason": 50,
+        "routed_share": 1.0,
+        "auroc_energy": 0.9966666666666667,
+        "fpr_at_tpr_energy": 0.011111111111111112,
+        "auroc_energy_t1_reference": 0.9984444444444445,
+        "auroc_confidence_reference": 0.9935555555555555,
+        "predicted_as": {
+          "inclusion": 48,
+          "pitted_surface": 2
+        }
+      },
+      "stripes": {
+        "n": 50,
+        "flagged_ood": 31,
+        "flagged_share": 0.62,
+        "flagged_share_lower_bound": 0.49395925210879366,
+        "routed_any_reason": 35,
+        "routed_share": 0.7,
+        "auroc_energy": 0.9508888888888889,
+        "fpr_at_tpr_energy": 0.26666666666666666,
+        "auroc_energy_t1_reference": 0.9533333333333334,
+        "auroc_confidence_reference": 0.9521111111111111,
+        "predicted_as": {
+          "pitted_surface": 25,
+          "patches": 8,
+          "inclusion": 6,
+          "rolled-in_scale": 5,
+          "scratches": 4,
+          "crazing": 2
+        }
+      },
+      "checkerboard": {
+        "n": 50,
+        "flagged_ood": 46,
+        "flagged_share": 0.92,
+        "flagged_share_lower_bound": 0.8262088418358065,
+        "routed_any_reason": 46,
+        "routed_share": 0.92,
+        "auroc_energy": 0.9911111111111112,
+        "fpr_at_tpr_energy": 0.03333333333333333,
+        "auroc_energy_t1_reference": 0.9904444444444445,
+        "auroc_confidence_reference": 0.9742222222222222,
+        "predicted_as": {
+          "inclusion": 46,
+          "scratches": 1,
+          "patches": 1,
+          "pitted_surface": 1,
+          "rolled-in_scale": 1
+        }
+      },
+      "shapes": {
+        "n": 50,
+        "flagged_ood": 48,
+        "flagged_share": 0.96,
+        "flagged_share_lower_bound": 0.8793858445779559,
+        "routed_any_reason": 48,
+        "routed_share": 0.96,
+        "auroc_energy": 0.9916666666666667,
+        "fpr_at_tpr_energy": 0.022222222222222223,
+        "auroc_energy_t1_reference": 0.9897777777777778,
+        "auroc_confidence_reference": 0.9614444444444444,
+        "predicted_as": {
+          "inclusion": 50
+        }
+      },
+      "blobs": {
+        "n": 50,
+        "flagged_ood": 12,
+        "flagged_share": 0.24,
+        "flagged_share_lower_bound": 0.14471815520804987,
+        "routed_any_reason": 35,
+        "routed_share": 0.7,
+        "auroc_energy": 0.9407777777777778,
+        "fpr_at_tpr_energy": 0.16666666666666666,
+        "auroc_energy_t1_reference": 0.9451111111111111,
+        "auroc_confidence_reference": 0.9593333333333334,
+        "predicted_as": {
+          "inclusion": 38,
+          "pitted_surface": 7,
+          "crazing": 4,
+          "patches": 1
+        }
+      },
+      "near_flat": {
+        "n": 50,
+        "flagged_ood": 48,
+        "flagged_share": 0.96,
+        "flagged_share_lower_bound": 0.8793858445779559,
+        "routed_any_reason": 48,
+        "routed_share": 0.96,
+        "auroc_energy": 0.9943333333333333,
+        "fpr_at_tpr_energy": 0.022222222222222223,
+        "auroc_energy_t1_reference": 0.9944444444444445,
+        "auroc_confidence_reference": 0.9852222222222222,
+        "predicted_as": {
+          "inclusion": 50
+        }
+      }
+    }
+  },
+  "energy_summary": {
+    "val": [
+      -35.16496276986565,
+      -15.179347810332542,
+      -4.757636079113932
+    ],
+    "synthetic": [
+      -261.5685119628906,
+      -5.080588052992699,
+      -1.9324780874692769
+    ],
+    "order": "min, median, max"
+  },
+  "claims": {
+    "can_claim": [
+      "On val, 4 of 180 in-distribution images are flagged as OOD by construction (2% budget); with low confidence, 12 images (6.7%) go to review.",
+      "On 400 synthetic non-steel images, 322 are flagged as OOD (at least 77.0% with 95% confidence); 355 go to review for either reason."
+    ],
+    "cannot_claim": [
+      "Anything about unseen steel defect types or other steel lines (near-OOD): the synthetic images are far from steel. X-SDD evaluates that later (ADR-010).",
+      "The false-alarm rate on new in-distribution images: on val it is fixed by the budget; test_frozen reports it (evaluate.py, report only).",
+      "A precise threshold: it is set by the 4 highest-energy val images; see the bootstrap interval."
+    ]
+  },
+  "provenance": {
+    "git_commit": "1d38efc2b2b9479d76ba1fa3fed8b7ff7ae3ac3d",
+    "git_dirty": false,
+    "device": "cpu"
+  }
+}

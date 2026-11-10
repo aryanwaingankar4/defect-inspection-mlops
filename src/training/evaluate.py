@@ -31,6 +31,12 @@ adds a ``review`` block (routed share, risk among accepted images with its Clopp
 bound and bootstrap interval, test errors caught by review); the predictions CSV gets
 ``routed_to_review``. Test results never change the threshold.
 
+OOD (TASK-017, ADR-027), main model only: the energy threshold set on ``val`` by
+``ood.py`` is read from ``<results_dir>/ood.json`` and only APPLIED here. The report adds
+an ``ood`` block (OOD flags on these in-distribution images are false alarms, routing for
+either reason, risk among the images still accepted); the CSV gets ``low_confidence``,
+``ood_flag`` and ``routed_to_review`` (either reason).
+
 ``--log-mlflow`` adds the test metrics, tags and allowlisted files to each model's existing
 MLflow run (from ``mlflow_run.json``); without it nothing talks to MLflow.
 """
@@ -57,6 +63,7 @@ from src.config import load_params
 from src.data.groups import confirmed, connected_groups, read_overlaps
 from src.pipelines.kaggle_job import LaunchError, check_split_is_clean
 from src.serving.preprocess import PreprocessConfig
+from src.serving.scoring import energy
 from src.training.compare_val import ModelSpec, load_checkpoint, specs_from_params
 from src.training.dataset import PROTECTED_SPLIT, SplitDataset
 from src.training.metrics import (
@@ -186,6 +193,58 @@ def load_threshold(
     if thr.get("passed") is not True:
         raise EvalError(f"the threshold of {spec.name} did not pass its risk check")
     return float(thr["threshold"]), path
+
+
+def load_ood_threshold(
+    params: Mapping[str, Any], spec: ModelSpec, calibration: Path, root: Path = REPO_ROOT
+) -> tuple[float, Path]:
+    """Energy OOD threshold of the main model, set on val of this split with this calibration
+    under the current budget (ADR-027)."""
+    path = root / spec.results_dir / params["ood"]["out_file"]
+    if not path.is_file():
+        raise EvalError(f"no OOD threshold for {spec.name}: run `make ood` first")
+    ood = json.loads(path.read_text(encoding="utf-8"))
+    fitted, split_csv = ood.get("fitted_on", {}), root / params["data"]["split_file"]
+    if fitted.get("split") != "val" or fitted.get("split_file") != split_csv.name:
+        raise EvalError(f"the OOD threshold of {spec.name} was not set on val of this split")
+    if fitted.get("split_sha256") != sha256_file(split_csv):
+        raise EvalError(f"the split file changed after the OOD threshold of {spec.name} was set")
+    if ood.get("calibration_sha256") != sha256_file(calibration):
+        raise EvalError(f"the OOD threshold of {spec.name} was set with another calibration")
+    if ood.get("rule", {}).get("id_flag_budget") != params["ood"]["id_flag_budget"]:
+        raise EvalError("ood.id_flag_budget changed since the OOD threshold was set")
+    return float(ood["ood_energy_threshold"]), path
+
+
+def ood_report(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    low_confidence: np.ndarray,
+    ood_flag: np.ndarray,
+    ucb_level: float,
+) -> dict[str, Any]:
+    """OOD flags on in-distribution images (false alarms) and routing for either reason."""
+    n = len(y_true)
+    wrong = y_pred != y_true
+    routed = low_confidence | ood_flag
+    k_fa, n_acc = int(ood_flag.sum()), int((~routed).sum())
+    k_acc = int((wrong & ~routed).sum())
+    return {
+        "n_images": int(n),
+        "flagged_ood": k_fa,
+        "false_alarm_share": k_fa / n,
+        "false_alarm_ucb": clopper_pearson_upper(k_fa, n, ucb_level),
+        "routed_low_confidence": int(low_confidence.sum()),
+        "routed_ood_only": int((ood_flag & ~low_confidence).sum()),
+        "routed_any_reason": int(routed.sum()),
+        "routed_share": float(routed.mean()),
+        "n_errors": int(wrong.sum()),
+        "errors_routed_any_reason": int((wrong & routed).sum()),
+        "n_accepted": n_acc,
+        "errors_accepted": k_acc,
+        "risk_ucb": clopper_pearson_upper(k_acc, n_acc, ucb_level),
+        "ucb_level": ucb_level,
+    }
 
 
 def check_split(params: Mapping[str, Any], root: Path = REPO_ROOT) -> None:
@@ -437,19 +496,20 @@ def write_predictions(
     probs: np.ndarray,
     calibrated: np.ndarray,
     classes: Sequence[str],
-    routed: np.ndarray | None = None,
+    extra: Mapping[str, np.ndarray] | None = None,
 ) -> None:
     """One row per image (file name only): raw and temperature-scaled top-class confidence,
-    and ``routed_to_review`` (0/1) when a review threshold applies."""
+    plus 0/1 columns from ``extra`` (e.g. routing flags) in the given order."""
     pred = probs.argmax(axis=1)
     rows = zip(paths, y_true, pred, probs.max(axis=1), calibrated.max(axis=1), strict=True)
     header = ["path", "true", "pred", "confidence", "calibrated_confidence", "correct"]
     with path.open("w", encoding="utf-8", newline="\n") as f:
         w = csv.writer(f, lineterminator="\n")
-        w.writerow(header + (["routed_to_review"] if routed is not None else []))
+        extra = dict(extra or {})
+        w.writerow(header + list(extra))
         for i, (p, t, y, conf, cal) in enumerate(rows):
             row = [p, classes[t], classes[y], f"{conf:.4f}", f"{cal:.4f}", int(t == y)]
-            w.writerow(row + ([int(routed[i])] if routed is not None else []))
+            w.writerow(row + [int(v[i]) for v in extra.values()])
 
 
 def write_outputs(
@@ -460,7 +520,7 @@ def write_outputs(
     probs: np.ndarray,
     calibrated: np.ndarray,
     classes: Sequence[str],
-    routed: np.ndarray | None = None,
+    extra: Mapping[str, np.ndarray] | None = None,
 ) -> dict[str, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     files = {
@@ -472,7 +532,7 @@ def write_outputs(
         "reliability_after": out_dir / "reliability_diagram_test_after.png",
     }
     files["metrics"].write_bytes((json.dumps(report, indent=2) + "\n").encode())
-    write_predictions(files["predictions"], paths, y_true, probs, calibrated, classes, routed)
+    write_predictions(files["predictions"], paths, y_true, probs, calibrated, classes, extra)
     cal = report["calibration"]
     for when in ("before", "after"):
         label = "raw softmax" if when == "before" else f"T = {cal['temperature']:.3f}"
@@ -562,6 +622,7 @@ def run(params: Mapping[str, Any], *, log_mlflow: bool = False) -> list[dict[str
     temperatures = [load_temperature(params, spec) for spec in specs]
     threshold, thr_path = load_threshold(params, specs[0], temperatures[0][1])  # main only
     ucb_level = float(params["threshold"]["ucb_level"])
+    ood_threshold, ood_path = load_ood_threshold(params, specs[0], temperatures[0][1])
     cfg = EvalConfig.from_params(params)
     split_csv, raw_dir = Path(params["data"]["split_file"]), Path(params["data"]["raw_dir"])
     pre_cfg = PreprocessConfig.from_params(params)
@@ -630,10 +691,16 @@ def run(params: Mapping[str, Any], *, log_mlflow: bool = False) -> list[dict[str
                 "timm": timm.__version__,
             },
         }
-        routed = None
-        if role == ROLES[0]:  # the review threshold exists for the main model only (ADR-023)
+        extra = None
+        if role == ROLES[0]:  # thresholds exist for the main model only (ADR-023, ADR-027)
             conf = top_confidence(calibrated)
-            routed = conf < threshold
+            low_conf = conf < threshold
+            ood_flag = energy(logits, temperature) > ood_threshold
+            extra = {
+                "low_confidence": low_conf,
+                "ood_flag": ood_flag,
+                "routed_to_review": low_conf | ood_flag,
+            }
             review = review_report(
                 y_true, probs.argmax(axis=1), conf, threshold, units, samples, ucb_level, cfg.level
             )
@@ -643,9 +710,19 @@ def run(params: Mapping[str, Any], *, log_mlflow: bool = False) -> list[dict[str
                 "applied_only": "threshold set on val (threshold.py); nothing is set on test",
                 **review,
             }
+            report["ood"] = {
+                "source": ood_path.relative_to(REPO_ROOT).as_posix(),
+                "decision_record": "ADR-027",
+                "ood_energy_threshold": ood_threshold,
+                "applied_only": (
+                    "threshold set on val ONNX logits (ood.py); applied here to PyTorch "
+                    "logits, equal within the ADR-025 parity tolerance; nothing is set on test"
+                ),
+                **ood_report(y_true, probs.argmax(axis=1), low_conf, ood_flag, ucb_level),
+            }
             report["provenance"] = report.pop("provenance")  # keep provenance last
         files = write_outputs(
-            cfg.out_dir / spec.name, report, ds.paths, y_true, probs, calibrated, classes, routed
+            cfg.out_dir / spec.name, report, ds.paths, y_true, probs, calibrated, classes, extra
         )
         summary = {"model": spec.name, "role": role, "out_dir": (cfg.out_dir / spec.name)}
         if log_mlflow:
@@ -694,6 +771,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"{rv['errors_routed']}/{rv['n_errors']}; risk among accepted "
                 f"{_fmt(rv['risk'])}, {rv['risk_ucb']['level']:.0%} upper bound "
                 f"{rv['risk_ucb']['value']:.4f}"
+            )
+        if "ood" in r:
+            o = r["ood"]
+            print(
+                f"  OOD (energy threshold {o['ood_energy_threshold']:.4f} from val, applied "
+                f"only): {o['flagged_ood']}/{o['n_images']} flagged (false alarms); routed for "
+                f"either reason {o['routed_any_reason']} ({o['routed_share']:.1%}); risk upper "
+                f"bound among accepted {o['risk_ucb']:.4f}"
             )
         print(f"  wrote {s['out_dir'].as_posix()}/")
         if "mlflow_run" in s:

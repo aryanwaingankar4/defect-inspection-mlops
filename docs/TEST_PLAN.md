@@ -13,14 +13,14 @@
 
 ## Model
 - **Golden images (ADR-017):**
-  - a committed synthetic image gives a fixed output with the committed model (runs in CI);
-  - a fixed real NEU image from `data/raw/` gives a fixed predicted class (`needs_data`; the image is never committed).
+  - a committed synthetic image (made by a formula, checked pixel by pixel) gives fixed preprocessing values and a fixed output on a small test model (runs in CI), and fixed `@champion` outputs (`needs_model`);
+  - two fixed real NEU `val` images from `data/raw/` give fixed `@champion` outputs that agree with `val_predictions.csv` (`needs_data`; the images are never committed).
 - Temperature `T` is applied in the serving path. Serving confidence matches the calibrated evaluation output.
 - FP32 vs INT8 per-class F1 is recorded in `results/`.
 
 ## API
-- Contract: `/predict` returns every documented field with the right types.
-- No API key, or a wrong one → 401.
+- Contract: the OpenAPI schema equals the committed snapshot `tests/contract/openapi.json`; `/predict`, `/health`, `/feedback` and every error body return exactly the documented fields with the right types (TASK-020).
+- Missing API key → 401; wrong API key → 403 (TASK-018).
 - Oversized file, wrong type, undecodable file, near-blank frame → clear 4xx error.
 - `/health` returns the model version and alias.
 - Logs contain the image hash and `request_id`, never image bytes.

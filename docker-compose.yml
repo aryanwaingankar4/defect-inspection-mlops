@@ -1,0 +1,28 @@
+# Local stack (TASK-021): the API with its SQLite prediction log on a named volume.
+# `make docker-up`. API_KEY is read from the shell or from .env for interpolation only;
+# no env_file, so other .env values (DagsHub credentials) never reach the container.
+# Prometheus + Grafana are added in TASK-032.
+name: defect-inspection
+
+services:
+  api:
+    image: defect-inspection-api:local      # built by `make docker-build` (with model labels)
+    build: .
+    environment:
+      API_KEY: ${API_KEY:?set API_KEY in .env or the shell}
+      DATABASE_URL: sqlite:////data/predictions.db
+    volumes:
+      - predictions:/data
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"  # local only
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m                       # large uploads are spooled here
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  predictions:

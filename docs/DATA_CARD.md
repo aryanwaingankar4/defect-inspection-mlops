@@ -139,7 +139,7 @@ Pictures of the closest cross-split pairs are in `results/private/` (git-ignored
 Code, logs and later reports must say so wherever relevant.
 - **Reviewer:** there are no real inspectors. A simulated reviewer (TASK-025) answers with the true NEU label, flipped at a configurable error rate.
 - **Production stream:** `production_stream` is a held-out slice of the same NEU dataset replayed as if it were live traffic. It is not real factory data and has the same distribution as training unless we change it.
-- **Drift:** drift is synthetic (brightness, blur, noise, contrast generators, TASK-033) or comes from a second dataset (X-SDD, TASK-031). No drift is observed in the wild.
+- **Drift:** drift is synthetic (a minimal generator in TASK-034; the full brightness/blur/noise/contrast set, TASK-033, comes later) or comes from a second dataset (X-SDD, TASK-031). No drift is observed in the wild.
 
 ### Limitations
 - **Small dataset:** the per-class counts in the split table are small, and `train_v1` is kept small on purpose. Per-class metrics on `test_frozen` have wide confidence intervals; the promotion gate uses a statistical test for this reason.

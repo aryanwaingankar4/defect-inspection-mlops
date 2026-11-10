@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, false
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -28,6 +28,8 @@ class Prediction(Base):
     routed_to_review: Mapped[bool] = mapped_column(Boolean, index=True)
     reason_low_confidence: Mapped[bool] = mapped_column(Boolean)
     reason_ood: Mapped[bool] = mapped_column(Boolean)
+    # ADR-030; added later, so older rows get false (no earlier prediction was audited)
+    reason_audit: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=false())
 
     model_name: Mapped[str] = mapped_column(String(128))
     model_version: Mapped[str] = mapped_column(String(32), index=True)

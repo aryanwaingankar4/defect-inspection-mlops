@@ -8,6 +8,14 @@ from pathlib import Path
 import pytest
 
 LOCAL_PREFIXES = ("sqlite:", "file:")
+TEST_AUDIT_SALT = "test-audit-salt-not-secret"  # fixed, so audit decisions are reproducible
+
+
+@pytest.fixture(autouse=True)
+def audit_salt(monkeypatch: pytest.MonkeyPatch) -> str:
+    """Every test gets the same non-secret audit salt (ADR-030); tests never read .env."""
+    monkeypatch.setenv("AUDIT_SALT", TEST_AUDIT_SALT)
+    return TEST_AUDIT_SALT
 
 
 @pytest.fixture(autouse=True)

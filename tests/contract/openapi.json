@@ -198,11 +198,12 @@
             "type": "string"
           },
           "reasons": {
-            "description": "why the image goes to review (ADR-023, ADR-027); empty if it does not",
+            "description": "why the image goes to review: low_confidence and/or ood (ADR-023, ADR-027), or audit for a random sample of otherwise accepted images (ADR-030); empty if it does not",
             "items": {
               "enum": [
                 "low_confidence",
-                "ood"
+                "ood",
+                "audit"
               ],
               "type": "string"
             },
@@ -239,6 +240,10 @@
       },
       "ThresholdInfo": {
         "properties": {
+          "audit_rate": {
+            "title": "Audit Rate",
+            "type": "number"
+          },
           "ood_energy": {
             "title": "Ood Energy",
             "type": "number"
@@ -255,10 +260,19 @@
         "required": [
           "temperature",
           "review",
-          "ood_energy"
+          "ood_energy",
+          "audit_rate"
         ],
         "title": "ThresholdInfo",
         "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "ApiKey": {
+        "description": "API key from the API_KEY env var: missing -> 401, wrong -> 403",
+        "in": "header",
+        "name": "X-API-Key",
+        "type": "apiKey"
       }
     }
   },
@@ -344,6 +358,11 @@
             "description": "model not loaded or prediction could not be logged"
           }
         },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
         "summary": "Feedback"
       }
     },
@@ -498,6 +517,11 @@
             "description": "model not loaded or prediction could not be logged"
           }
         },
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
         "summary": "Predict"
       }
     }

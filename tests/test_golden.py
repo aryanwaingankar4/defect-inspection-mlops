@@ -26,7 +26,7 @@ from src.serving.validation import ValidationConfig, decode_checked  # noqa: E40
 from tests import serving_helpers as sh  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PARAMS = load_params(REPO_ROOT / "configs" / "params.yaml")
+PARAMS = sh.without_audit(load_params(REPO_ROOT / "configs" / "params.yaml"))  # exact routing
 GOLDEN = REPO_ROOT / "tests" / "golden"
 PNG = (GOLDEN / gd.SYNTHETIC_NAME).read_bytes()
 EXPECTED = json.loads((GOLDEN / gd.EXPECTED_NAME).read_text(encoding="utf-8"))

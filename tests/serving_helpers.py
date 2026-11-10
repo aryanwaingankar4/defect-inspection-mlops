@@ -6,6 +6,7 @@ brightness, so tests can make confident images (dark or bright) and unsure ones 
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import io
 import json
@@ -110,3 +111,10 @@ def image_bytes(
     buf = io.BytesIO()
     Image.fromarray(pixels).save(buf, format=fmt)
     return buf.getvalue()
+
+
+def without_audit(params: Mapping[str, Any]) -> dict:
+    """Params with the random audit off, for tests that check exact routing (ADR-030)."""
+    p = copy.deepcopy(dict(params))
+    p["serving"]["audit_rate"] = 0.0
+    return p

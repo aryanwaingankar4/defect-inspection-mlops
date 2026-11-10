@@ -1,0 +1,11 @@
+# Load the dashboards mounted read-only at /etc/grafana/dashboards at startup (TASK-032).
+apiVersion: 1
+
+providers:
+  - name: defect-inspection
+    folder: Defect inspection
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/dashboards

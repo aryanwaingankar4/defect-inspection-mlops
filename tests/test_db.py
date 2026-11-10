@@ -131,3 +131,10 @@ def test_database_url_comes_from_the_environment(monkeypatch):
 def test_safe_url_hides_the_password():
     shown = store.safe_url("postgresql://user:s3cret@host:5432/db")
     assert "s3cret" not in shown and "user" in shown and "host" in shown
+
+
+def test_review_queue_size_counts_routed_rows(db):
+    db.add(row("a" * 32))
+    db.add(row("b" * 32, routed_to_review=True, reason_low_confidence=True))
+    db.add(row("c" * 32, routed_to_review=True, reason_ood=True))
+    assert db.review_queue_size() == 2

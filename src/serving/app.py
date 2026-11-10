@@ -182,6 +182,11 @@ class Metrics:
             buckets=(-30, -25, -20, -15, -12, -10, -8, -6, -4, -2, 0),
             registry=r,
         )
+        self.queue_size = Gauge(
+            "defect_api_review_queue_size",
+            "Predictions waiting for review (read from the prediction log at scrape time)",
+            registry=r,
+        )
         self.db_failures = Counter(
             "defect_api_db_write_failures_total",
             "Predictions not served because the log write failed (ADR-029)",
@@ -208,6 +213,14 @@ def error_response(status: int, code: str, detail: str, request_id: str) -> JSON
 
 def key_ok(given: str | None, expected: str) -> bool:
     return given is not None and hmac.compare_digest(given.encode(), expected.encode())
+
+
+def queue_size(db: PredictionLog) -> float:
+    """Review queue size for the gauge; NaN if the database cannot be read (visible as a gap)."""
+    try:
+        return float(db.review_queue_size())
+    except Exception:  # noqa: BLE001 - a scrape must never fail
+        return float("nan")
 
 
 def endpoint_label(path: str) -> str:
@@ -302,6 +315,7 @@ def create_app(
         db = PredictionLog(db_url)
         db.create_tables()  # raises if the database is unreachable: the API does not start
         app.state.bundle, app.state.db = bundle, db
+        metrics.queue_size.set_function(lambda: queue_size(db))
         info = bundle.model_info
         metrics.model_info.labels(info["name"], info["version"], info["precision"]).set(1)
         log.info("startup", extra={"fields": {"model": info, "bundle_dir": str(bundle_path)}})

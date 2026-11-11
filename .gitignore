@@ -16,6 +16,7 @@ venv/
 # Data and models (tracked by DVC, not git)
 /data/raw/
 /data/feedback/
+/data/archive/
 /data/xsdd/
 /models/
 *.pt

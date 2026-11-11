@@ -94,6 +94,26 @@ def test_run_labels_with_truth_and_skips_test_frozen_and_unknown(db, archive):
     assert sim.run(db, arc, CLASSES, cfg)["labelled"] == 0  # rerun: nothing new
 
 
+def test_run_refuses_every_split_but_production_stream(tmp_path, db):
+    items = [
+        ("crazing", "production_stream", 1),
+        ("inclusion", "val", 2),
+        ("patches", "train_v1", 3),
+        ("scratches", "test_frozen", 4),
+    ]
+    split, raw, shas = rh.make_archive(tmp_path / "splits", items)
+    arc = ImageArchive.from_split_file(split, raw)
+    for i, name in enumerate(shas, start=1):
+        db.add(rh.prediction(rid(i), shas[name], reasons=("low_confidence",)))
+    cfg = sim.SimConfig(error_rate=0.0, seed=31, reviewer_id="sim", limit=100)
+    out = sim.run(db, arc, CLASSES, cfg)
+    assert out["labelled"] == 1 and db.feedback_for(rid(1))["label"] == "crazing"
+    assert out["skipped_not_production_stream"] == 2  # val + train_v1
+    assert out["skipped_test_frozen"] == 1
+    assert [db.feedback_for(rid(i)) for i in (2, 3, 4)] == [None, None, None]
+    assert out["queue_left"] == 3
+
+
 def test_run_respects_the_limit_and_is_order_independent(tmp_path, archive):
     arc, shas = archive
     cfg = sim.SimConfig(error_rate=0.5, seed=31, reviewer_id="sim", limit=100)

@@ -77,6 +77,14 @@ See `docs/ARCHITECTURE.md`.
 
 Setup instructions will be added as each phase lands. The target is `make setup && make demo`.
 
+### Local review loop (simulated)
+
+`make serve` runs the API and writes the prediction log to `data/predictions.db` (`DATABASE_URL` in `.env`). `make stream`, `make review-ui`, `make simulate-review` and `make feedback-export` all work on that local log.
+
+The Docker stack (`make docker-up`) keeps its own log in the Docker volume `predictions`. The review UI does **not** read it, so traffic sent to the Docker API never shows up in the review queue. One SQLite file cannot be shared safely between Windows and the Docker Desktop VM, so run the loop with `make serve`. In the cloud, both sides will share PostgreSQL through `DATABASE_URL`.
+
+`make db-reset` moves the local log to `data/archive/` (git-ignored) and starts an empty one, for example after testing the UI by hand.
+
 ## Documentation
 
 | File | Purpose |

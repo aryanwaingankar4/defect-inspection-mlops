@@ -4,6 +4,7 @@ data:
   raw_dir: data/raw                              # DVC/git-ignored NEU images (ADR-015)
   split_file: data/splits/neu_split_v2.csv       # committed: path,class,split. Group-aware (ADR-021)
   split_file_v1: data/splits/neu_split_v1.csv    # first split, kept for history: near-copies cross splits
+  archive_dir: data/archive                      # git-ignored: old local prediction logs (`make db-reset`, ADR-032)
 
 split:
   seed: 42                                       # split-only seed; independent of training seeds
@@ -165,6 +166,9 @@ review:                            # TASK-024/025 (ADR-031). The reviewer and th
     seed: 31                       # with the request id: the same labels on every rerun
     reviewer_id: simulated-reviewer
     limit: 1000                    # most labels per run
+  export:                          # src/review/export.py (`make feedback-export`, ADR-032)
+    out_dir: data/feedback         # DVC-tracked (`dvc add data/feedback`), git-ignored; paths + labels, no pixels
+    report: results/feedback/export_report.json   # committed: counts only
   stream:                          # src/pipelines/stream.py (`make stream`)
     split: production_stream       # the only split the stream may send (never test_frozen)
     seed: 37                       # order of the images

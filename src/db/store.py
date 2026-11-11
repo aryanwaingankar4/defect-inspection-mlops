@@ -75,6 +75,13 @@ class PredictionLog:
         with Session(self.engine) as session:
             return int(session.scalar(select(func.count()).select_from(Prediction)) or 0)
 
+    def review_queue_size(self) -> int:
+        """Predictions routed to review. Until feedback is stored (TASK-026) every routed
+        prediction counts as waiting; then it becomes "routed and not yet labelled"."""
+        with Session(self.engine) as session:
+            query = select(func.count()).select_from(Prediction).where(Prediction.routed_to_review)
+            return int(session.scalar(query) or 0)
+
     def recent(self, n: int = 10) -> list[dict[str, Any]]:
         """The ``n`` newest rows as dicts, newest first (``created_at`` as UTC)."""
         with Session(self.engine) as session:

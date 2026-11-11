@@ -6,6 +6,8 @@ into or near the container. Checks:
 health check healthy, /health, /predict (= tests/golden/expected.json), 401 without key,
 non-root user, no torch/mlflow inside, read-only filesystem, one logged row that survives a
 restart, the key not in the logs, image labels.
+On success it writes ``results/docker/image_report.json`` (image tag, size, user id, read-only
+root filesystem, the git commit the image was built from).
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PROJECT = "defect-inspection-smoke"
 PORT = "18000"
 IMAGE = "defect-inspection-api:local"
+REPORT = ROOT / "results" / "docker" / "image_report.json"
 BASE = f"http://127.0.0.1:{PORT}"
 GOLDEN = ROOT / "tests" / "golden"
 ROW_COUNT = (
@@ -103,7 +106,13 @@ def check(ok: bool, label: str, results: list[str]) -> None:
 
 def run() -> list[str]:
     key = secrets.token_hex(16)  # throwaway: never printed
-    env = {**os.environ, "API_KEY": key, "API_PORT": PORT}
+    # compose checks every required variable, also for services this smoke does not start
+    env = {
+        **os.environ,
+        "API_KEY": key,
+        "API_PORT": PORT,
+        "GRAFANA_ADMIN_PASSWORD": secrets.token_hex(16),
+    }
     out: list[str] = []
     labels = json.loads(
         subprocess.run(
@@ -126,7 +135,7 @@ def run() -> list[str]:
         f"commit {labels['org.opencontainers.image.revision']}"
     )
     try:
-        compose("up", "-d", "--no-build", env=env)
+        compose("up", "-d", "--no-build", "api", env=env)
         out.append(f"  healthy after {wait_healthy(env):.1f} s (Docker HEALTHCHECK)")
         status, health = request("/health")
         check(status == 200 and health["database"] == "ok", f"/health 200: {health}", out)
@@ -179,10 +188,30 @@ def run() -> list[str]:
         logs = compose("logs", "api", env=env)
         check(key not in logs, "API key not in the container logs", out)
         check(pred["request_id"] in logs, "request_id in the JSON logs", out)
+        write_report(
+            {
+                "image": IMAGE,
+                "size_mb": round(int(size) / 1e6, 1),
+                "size_source": "docker image inspect .Size",
+                "user_id": int(uid),
+                "read_only_root_filesystem": ro,
+                "git_commit": labels["org.opencontainers.image.revision"],
+                "model_version": version,
+                "onnx_sha256": labels["io.defect-inspection.onnx-sha256"],
+                "smoke_passed": True,
+                "checked_by": "make docker-smoke (scripts/docker_smoke.py)",
+            }
+        )
+        out.append(f"  wrote {REPORT.relative_to(ROOT).as_posix()}")
     finally:
         compose("down", "-v", env=env, check=False)
         out.append("  stopped; smoke volume removed")
     return out
+
+
+def write_report(report: dict) -> None:
+    REPORT.parent.mkdir(parents=True, exist_ok=True)
+    REPORT.write_bytes((json.dumps(report, indent=2) + "\n").encode())
 
 
 def main() -> None:

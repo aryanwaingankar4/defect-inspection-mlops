@@ -421,3 +421,13 @@ def test_rows_accumulate_across_requests(client, database_url):
         post_image(client, sh.image_bytes(DARK, seed=i))
     rows = PredictionLog(database_url).recent(10)
     assert len(rows) == 3 and len({r["request_id"] for r in rows}) == 3
+
+
+def test_review_queue_gauge_counts_routed_rows(client, monkeypatch):
+    post_image(client, sh.image_bytes(DARK))  # accepted
+    post_image(client, sh.image_bytes(MID))  # routed
+    post_image(client, sh.image_bytes(MID, seed=1))  # routed
+    assert "defect_api_review_queue_size 2.0" in client.get("/metrics").text
+    monkeypatch.setattr(client.app.state.db, "review_queue_size", lambda: 1 / 0)
+    r = client.get("/metrics")  # a broken database never breaks the scrape
+    assert r.status_code == 200 and "defect_api_review_queue_size NaN" in r.text

@@ -20,7 +20,7 @@ IMAGE := defect-inspection-api:local
 MANIFEST := models/serving/manifest.json
 
 .PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
-	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke register kaggle-dataset kaggle-push kaggle-status kaggle-output
+	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke monitoring-smoke register kaggle-dataset kaggle-push kaggle-status kaggle-output
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -115,14 +115,17 @@ docker-build: ## Build the API image with the serving bundle inside (needs `make
 		--build-arg ONNX_SHA256=$$($(RUN) python -c "import json; print(json.load(open('$(MANIFEST)'))['onnx_sha256'])") \
 		--build-arg GIT_COMMIT=$$(git rev-parse --short HEAD) .
 
-docker-up: docker-build ## Run the API in Docker on http://127.0.0.1:8000 (API_KEY from .env; log on a volume)
+docker-up: docker-build ## API :8000 + Prometheus :9090 + Grafana :3000 on localhost (API_KEY, GRAFANA_ADMIN_PASSWORD from .env)
 	docker compose up -d --no-build
 
-docker-down: ## Stop the Docker stack (the prediction-log volume is kept)
+docker-down: ## Stop the Docker stack (volumes are kept)
 	docker compose down
 
 docker-smoke: docker-build ## Build, start and check the API container, then remove it (synthetic image only)
 	$(RUN) python scripts/docker_smoke.py
+
+monitoring-smoke: docker-build ## API + Prometheus + Grafana: metrics scraped, dashboard provisioned (TASK-032)
+	$(RUN) python scripts/monitoring_smoke.py
 
 golden: ## Golden images + expected @champion outputs -> tests/golden/ (needs bundle + NEU val; ADR-017)
 	$(RUN_SERVE) python -m src.serving.golden --config $(PARAMS)

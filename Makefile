@@ -24,7 +24,7 @@ MANIFEST := models/serving/manifest.json
 SMOKE_AUDIT_SALT := smoke-test-audit-salt-not-secret
 
 .PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
-	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke monitoring-smoke review-ui register kaggle-dataset kaggle-push kaggle-status kaggle-output
+	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke monitoring-smoke review-ui stream simulate-review register kaggle-dataset kaggle-push kaggle-status kaggle-output
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -134,6 +134,13 @@ monitoring-smoke: docker-build ## API + Prometheus + Grafana: metrics scraped, d
 review-ui: ## Review queue UI on http://127.0.0.1:8501 (REVIEWER_PASSWORD, DATABASE_URL from .env; ADR-031)
 	$(RUN_UI) $(ENV_FILE) streamlit run src/review/app.py --server.address 127.0.0.1 --server.port 8501 \
 		--browser.gatherUsageStats false -- --config $(PARAMS)
+
+N ?= 40
+stream: ## SIMULATED stream: send N production_stream images to the API (API_KEY from .env). ARGS: --start K
+	$(RUN) $(ENV_FILE) python -m src.pipelines.stream --config $(PARAMS) -n $(N) $(ARGS)
+
+simulate-review: ## SIMULATED reviewer labels the queue (DATABASE_URL from .env). ARGS: --limit, --error-rate
+	$(RUN_SERVE) $(ENV_FILE) python -m src.review.simulated --config $(PARAMS) $(ARGS)
 
 golden: ## Golden images + expected @champion outputs -> tests/golden/ (needs bundle + NEU val; ADR-017)
 	$(RUN_SERVE) python -m src.serving.golden --config $(PARAMS)

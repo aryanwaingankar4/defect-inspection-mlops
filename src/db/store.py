@@ -148,6 +148,24 @@ class PredictionLog:
         with Session(self.engine) as session:
             return int(session.scalar(select(func.count()).select_from(Feedback)) or 0)
 
+    def labelled_images(self) -> list[dict[str, Any]]:
+        """Every feedback row with its image hash, oldest first (feedback export, ADR-032).
+
+        Selects only request id, label, reviewer kind and hash: the simulated-noise columns
+        (``simulated_flipped``, ``simulated_error_rate``) are never read for training."""
+        query = (
+            select(
+                Feedback.request_id,
+                Feedback.label,
+                Feedback.reviewer_kind,
+                Prediction.image_sha256,
+            )
+            .join(Prediction, Prediction.request_id == Feedback.request_id)
+            .order_by(Feedback.id)
+        )
+        with Session(self.engine) as session:
+            return [dict(r._mapping) for r in session.execute(query)]
+
     def recent(self, n: int = 10) -> list[dict[str, Any]]:
         """The ``n`` newest rows as dicts, newest first (``created_at`` as UTC)."""
         with Session(self.engine) as session:

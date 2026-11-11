@@ -1,5 +1,7 @@
 # Self-Improving Steel Defect Inspection System
 
+[![CI](https://github.com/aryanwaingankar4/defect-inspection-mlops/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/aryanwaingankar4/defect-inspection-mlops/actions/workflows/ci.yml)
+
 A steel-surface defect classifier that improves itself in production — and proves each update is safe before it ships.
 
 Low-confidence or unfamiliar images go to a human review queue. Corrected labels are versioned, a pipeline retrains the model, and a new model is promoted only if it is statistically better than the current one on a frozen test set. Everything is served, monitored and deployed with standard MLOps tooling.

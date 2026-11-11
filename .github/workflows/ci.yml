@@ -1,0 +1,84 @@
+# CI (TASK-035): lint + fast tests from the lockfile, and a Trivy scan.
+# No DVC, no secrets, no NEU images, no model bundle: `make test` deselects the needs_data /
+# needs_model / slow / manual tests. Actions are pinned to full commit SHAs (tag in the comment);
+# Trivy is a pinned release binary checked against its published SHA-256.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-test:
+    name: Lint + tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.6"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install from the lockfile
+        run: uv sync --locked --group train --group serve --group ui
+
+      - name: Ruff (check + format --check)
+        run: make lint
+
+      - name: Fast tests (no data, no model)
+        run: make test
+
+  trivy:
+    name: Trivy (fs + config)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      TRIVY_VERSION: "0.76.1"
+      TRIVY_SHA256: c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Trivy (pinned release, checksum verified)
+        run: |
+          tarball="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -sSfL -o "$RUNNER_TEMP/$tarball" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${tarball}"
+          echo "${TRIVY_SHA256}  $RUNNER_TEMP/$tarball" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/trivy"
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP/trivy" trivy
+          echo "$RUNNER_TEMP/trivy" >> "$GITHUB_PATH"
+
+      # The image cannot be built here: it needs the model bundle (git-ignored), so the scan
+      # covers the lockfile, secrets and the Dockerfile/IaC config instead of the built image.
+      - name: Report HIGH and CRITICAL (does not fail)
+        run: |
+          trivy fs --scanners vuln,secret --severity HIGH,CRITICAL --exit-code 0 --no-progress .
+          trivy config --severity HIGH,CRITICAL --exit-code 0 .
+          {
+            echo '## Trivy: HIGH and CRITICAL findings (report only)'
+            echo '```'
+            trivy fs --scanners vuln,secret --severity HIGH,CRITICAL --exit-code 0 --quiet .
+            trivy config --severity HIGH,CRITICAL --exit-code 0 --quiet .
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail on CRITICAL with a fix available
+        run: |
+          trivy fs --scanners vuln,secret --severity CRITICAL --ignore-unfixed --exit-code 1 --no-progress .
+          trivy config --severity CRITICAL --exit-code 1 .

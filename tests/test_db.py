@@ -86,7 +86,7 @@ def test_schema_is_exactly_the_adr_029_columns_and_holds_no_bytes():
 
 def test_round_trip_and_folder_creation(db):
     db.add(row())
-    assert db.table_names() == ["predictions"] and db.count() == 1
+    assert sorted(db.table_names()) == ["feedback", "predictions"] and db.count() == 1
     got = db.recent(1)[0]
     expected = row()
     for key, value in expected.items():

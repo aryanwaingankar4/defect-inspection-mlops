@@ -6,6 +6,8 @@ RUN := uv run --locked
 RUN_TRAIN := uv run --locked --group train
 # The API needs only the serve group (ONNX Runtime, FastAPI; no torch, no mlflow).
 RUN_SERVE := uv run --locked --group serve
+# The review UI (Streamlit) needs the ui group plus the database layer from the serve group.
+RUN_UI := uv run --locked --group ui --group serve
 # Publishing to MLflow loads secrets (DagsHub) from .env if it exists. Training and tests never do.
 ENV_FILE := $(if $(wildcard .env),--env-file .env,)
 
@@ -22,7 +24,7 @@ MANIFEST := models/serving/manifest.json
 SMOKE_AUDIT_SALT := smoke-test-audit-salt-not-secret
 
 .PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
-	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke monitoring-smoke register kaggle-dataset kaggle-push kaggle-status kaggle-output
+	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke monitoring-smoke review-ui register kaggle-dataset kaggle-push kaggle-status kaggle-output
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -42,10 +44,10 @@ format: ## Auto-fix lint issues and format code
 	$(RUN) ruff format .
 
 test: ## Fast tests (skips slow, manual, needs_data, needs_model)
-	$(RUN_TRAIN) --group serve pytest -m "$(FAST_TESTS)"
+	$(RUN_TRAIN) --group serve --group ui pytest -m "$(FAST_TESTS)"
 
 test-all: ## All tests, including slow / manual / needs_data / needs_model
-	$(RUN_TRAIN) --group serve pytest
+	$(RUN_TRAIN) --group serve --group ui pytest
 
 check: lint test ## Lint + fast tests (what CI runs)
 
@@ -128,6 +130,10 @@ docker-smoke: docker-build ## Build, start and check the API container, then rem
 
 monitoring-smoke: docker-build ## API + Prometheus + Grafana: metrics scraped, dashboard provisioned (TASK-032)
 	AUDIT_SALT=$(SMOKE_AUDIT_SALT) $(RUN) python scripts/monitoring_smoke.py
+
+review-ui: ## Review queue UI on http://127.0.0.1:8501 (REVIEWER_PASSWORD, DATABASE_URL from .env; ADR-031)
+	$(RUN_UI) $(ENV_FILE) streamlit run src/review/app.py --server.address 127.0.0.1 --server.port 8501 \
+		--browser.gatherUsageStats false -- --config $(PARAMS)
 
 golden: ## Golden images + expected @champion outputs -> tests/golden/ (needs bundle + NEU val; ADR-017)
 	$(RUN_SERVE) python -m src.serving.golden --config $(PARAMS)

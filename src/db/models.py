@@ -1,10 +1,11 @@
-"""Table definitions (TASK-019, ADR-029). Never a column for image bytes, pixels or file names."""
+"""Table definitions (TASK-019, ADR-029; feedback: TASK-024, ADR-031). Never a column for image
+bytes, pixels or file names."""
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, false
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, false
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -47,3 +48,21 @@ class Prediction(Base):
     contrast: Mapped[float] = mapped_column(Float)
     sharpness: Mapped[float] = mapped_column(Float)
     logits: Mapped[list[float]] = mapped_column(JSON)  # raw logits, class order of the model
+
+
+class Feedback(Base):
+    """One final label per routed prediction (ADR-031)."""
+
+    __tablename__ = "feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    request_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("predictions.request_id"), unique=True, nullable=False
+    )
+    label: Mapped[str] = mapped_column(String(64))  # a class or "unknown"
+    reviewer_kind: Mapped[str] = mapped_column(String(16))  # "human" | "simulated"
+    reviewer_id: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)  # UTC
+    # simulated reviewer only: to measure reviewer noise; never read by retraining or the gate
+    simulated_error_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    simulated_flipped: Mapped[bool | None] = mapped_column(Boolean, nullable=True)

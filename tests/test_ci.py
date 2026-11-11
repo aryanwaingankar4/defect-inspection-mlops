@@ -45,6 +45,11 @@ def test_installs_from_the_lockfile_with_cache_and_runs_make_targets():
     assert "make lint" in text and "make test" in text
 
 
+def test_test_job_checks_out_full_history():
+    checkout = WORKFLOW["jobs"]["lint-test"]["steps"][0]
+    assert checkout["with"]["fetch-depth"] == 0  # test_promote looks up evidence commits
+
+
 def test_no_dvc_data_or_model_in_ci():
     text = run_text()
     for forbidden in ("dvc pull", "dvc ", "make data", "serving-bundle", "test-all", "kaggle"):

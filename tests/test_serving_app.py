@@ -493,3 +493,29 @@ def test_audit_salt_is_never_logged(bundle_dir, caplog, audit_salt):
         post_image(c, sh.image_bytes(DARK))
     lines = "\n".join(JsonFormatter().format(r) for r in caplog.records)
     assert '"audit"' in lines and audit_salt not in lines
+
+
+# ---------------------------------------------------------------- metric series at startup
+
+
+def test_labelled_series_exist_at_zero_after_startup(client):
+    """Without this, increase()/rate() miss a series' first counts (dashboard bug, TASK-032)."""
+    text = client.get("/metrics").text
+    for name in sh.CLASSES:
+        assert f'defect_api_predictions_total{{prediction="{name}"}} 0.0' in text, name
+    for reason in api.ROUTING_REASONS:
+        assert f'defect_api_routed_reason_total{{reason="{reason}"}} 0.0' in text, reason
+    for code in api.REJECTION_CODES:
+        assert f'defect_api_rejections_total{{reason="{code}"}} 0.0' in text, code
+
+
+def test_rejection_code_list_matches_the_code():
+    import re
+
+    pattern = re.compile(
+        r'(?:InputRejected|ApiError|reject)\(\s*(?:request,\s*)?\d{3},\s*"([a-z_]+)"', re.S
+    )
+    found = set()
+    for path in (REPO_ROOT / "src" / "serving").glob("*.py"):
+        found |= set(pattern.findall(path.read_text(encoding="utf-8")))
+    assert found == set(api.REJECTION_CODES)

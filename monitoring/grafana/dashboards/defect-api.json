@@ -86,8 +86,8 @@
     {
       "id": 3,
       "type": "stat",
-      "title": "Routed share (1 h)",
-      "description": "",
+      "title": "Routed share (since API start)",
+      "description": "routed / predictions since the API started; no data (never infinite) before the first prediction",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -105,7 +105,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(increase(defect_api_routed_to_review_total[1h])) / sum(increase(defect_api_predictions_total[1h]))",
+          "expr": "sum(defect_api_routed_to_review_total) / (sum(defect_api_predictions_total) > 0)",
           "legendFormat": "routed",
           "instant": true,
           "range": false
@@ -390,8 +390,8 @@
     {
       "id": 11,
       "type": "barchart",
-      "title": "Predictions by class (1 h)",
-      "description": "",
+      "title": "Predictions by class (since API start)",
+      "description": "exact counts since the API started (increase() would extrapolate)",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -409,7 +409,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (prediction) (increase(defect_api_predictions_total[1h]))",
+          "expr": "sum by (prediction) (defect_api_predictions_total)",
           "legendFormat": "{{prediction}}",
           "instant": true,
           "range": false

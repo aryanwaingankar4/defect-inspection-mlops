@@ -48,8 +48,8 @@ from src.serving import json_logging
 from src.serving.bundle import Bundle, load_bundle
 from src.serving.features import image_features
 from src.serving.preprocess import to_model_input
-from src.serving.routing import with_audit
-from src.serving.scoring import score
+from src.serving.routing import REASON_AUDIT, with_audit
+from src.serving.scoring import REASON_LOW_CONFIDENCE, REASON_OOD, score
 from src.serving.validation import Decoded, InputRejected, ValidationConfig, decode_checked
 
 API_KEY_ENV = "API_KEY"
@@ -66,6 +66,24 @@ REQUEST_ID_HEADER = "X-Request-ID"
 PROTECTED = frozenset({"/predict", "/feedback"})
 KNOWN_PATHS = frozenset({"/predict", "/feedback", "/health", "/metrics"})
 MULTIPART_OVERHEAD = 16 * 1024  # form boundaries and part headers around the file
+ROUTING_REASONS = (REASON_LOW_CONFIDENCE, REASON_OOD, REASON_AUDIT)
+# Every error code the API answers with (tests check this list against the code).
+REJECTION_CODES = (
+    "missing_api_key",
+    "invalid_api_key",
+    "length_required",
+    "too_large",
+    "empty_file",
+    "undecodable",
+    "unsupported_format",
+    "too_small",
+    "too_many_pixels",
+    "near_blank",
+    "invalid_request",
+    "unknown_label",
+    "not_ready",
+    "log_unavailable",
+)
 log = logging.getLogger(f"{json_logging.LOGGER_NAME}.app")
 
 
@@ -212,6 +230,17 @@ class Metrics:
             registry=r,
         )
 
+    def init_labels(self, classes: list[str]) -> None:
+        """Create every labelled series at 0 at startup. A series that first appears with a
+        value above 0 has no earlier sample, so increase()/rate() would miss its first counts
+        (the dashboard showed 0 per class and an infinite routed share)."""
+        for name in classes:
+            self.predictions.labels(name)
+        for reason in ROUTING_REASONS:
+            self.routed_reason.labels(reason)
+        for code in REJECTION_CODES:
+            self.rejections.labels(code)
+
 
 # ---------------------------------------------------------------- helpers
 
@@ -341,6 +370,7 @@ def create_app(
         metrics.queue_size.set_function(lambda: queue_size(db))
         info = bundle.model_info
         metrics.model_info.labels(info["name"], info["version"], info["precision"]).set(1)
+        metrics.init_labels(bundle.classes)
         log.info("startup", extra={"fields": {"model": info, "bundle_dir": str(bundle_path)}})
         yield
         app.state.bundle = app.state.db = None

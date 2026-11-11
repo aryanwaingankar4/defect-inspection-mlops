@@ -18,6 +18,8 @@ RAW_DIR := data/raw
 PARAMS := configs/params.yaml
 IMAGE := defect-inspection-api:local
 MANIFEST := models/serving/manifest.json
+# Fixed, non-secret audit salt for the smoke checks only (ADR-030); the real salt is in .env.
+SMOKE_AUDIT_SALT := smoke-test-audit-salt-not-secret
 
 .PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
 	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke monitoring-smoke register kaggle-dataset kaggle-push kaggle-status kaggle-output
@@ -115,17 +117,17 @@ docker-build: ## Build the API image with the serving bundle inside (needs `make
 		--build-arg ONNX_SHA256=$$($(RUN) python -c "import json; print(json.load(open('$(MANIFEST)'))['onnx_sha256'])") \
 		--build-arg GIT_COMMIT=$$(git rev-parse --short HEAD) .
 
-docker-up: docker-build ## API :8000 + Prometheus :9090 + Grafana :3000 on localhost (API_KEY, GRAFANA_ADMIN_PASSWORD from .env)
+docker-up: docker-build ## API :8000 + Prometheus :9090 + Grafana :3000 on localhost (API_KEY, AUDIT_SALT, GRAFANA_ADMIN_PASSWORD from .env)
 	docker compose up -d --no-build
 
 docker-down: ## Stop the Docker stack (volumes are kept)
 	docker compose down
 
 docker-smoke: docker-build ## Build, start and check the API container, then remove it (synthetic image only)
-	$(RUN) python scripts/docker_smoke.py
+	AUDIT_SALT=$(SMOKE_AUDIT_SALT) $(RUN) python scripts/docker_smoke.py
 
 monitoring-smoke: docker-build ## API + Prometheus + Grafana: metrics scraped, dashboard provisioned (TASK-032)
-	$(RUN) python scripts/monitoring_smoke.py
+	AUDIT_SALT=$(SMOKE_AUDIT_SALT) $(RUN) python scripts/monitoring_smoke.py
 
 golden: ## Golden images + expected @champion outputs -> tests/golden/ (needs bundle + NEU val; ADR-017)
 	$(RUN_SERVE) python -m src.serving.golden --config $(PARAMS)

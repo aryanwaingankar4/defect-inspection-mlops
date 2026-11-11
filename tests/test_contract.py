@@ -134,6 +134,14 @@ def test_snapshot_documents_every_endpoint_and_error():
                 ref = entry["content"]["application/json"]["schema"]["$ref"]
                 assert ref.endswith("/ErrorResponse"), code
     assert "HTTPValidationError" not in SCHEMA["components"]["schemas"]  # our 422 body is used
+    scheme = SCHEMA["components"]["securitySchemes"]["ApiKey"]
+    assert scheme == {**scheme, "type": "apiKey", "in": "header", "name": "X-API-Key"}
+    for path in ("/predict", "/feedback"):
+        assert paths[path]["post"]["security"] == [{"ApiKey": []}], path
+    for path in ("/health", "/metrics"):
+        assert "security" not in paths[path]["get"], path
+    reasons = SCHEMA["components"]["schemas"]["PredictResponse"]["properties"]["reasons"]
+    assert set(reasons["items"]["enum"]) == {"low_confidence", "ood", "audit"}
     required = set(SCHEMA["components"]["schemas"]["PredictResponse"]["required"])
     assert required >= {
         "request_id",

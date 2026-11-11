@@ -23,6 +23,7 @@ EXPECTED_COLUMNS = {
     "routed_to_review",
     "reason_low_confidence",
     "reason_ood",
+    "reason_audit",
     "model_name",
     "model_version",
     "model_precision",
@@ -50,6 +51,7 @@ def row(request_id: str = "a" * 32, **changes) -> dict:
         "routed_to_review": False,
         "reason_low_confidence": False,
         "reason_ood": False,
+        "reason_audit": False,
         "model_name": "steel-defect-classifier",
         "model_version": "2",
         "model_precision": "fp32",
@@ -138,3 +140,57 @@ def test_review_queue_size_counts_routed_rows(db):
     db.add(row("b" * 32, routed_to_review=True, reason_low_confidence=True))
     db.add(row("c" * 32, routed_to_review=True, reason_ood=True))
     assert db.review_queue_size() == 2
+
+
+OLD_TABLE = """CREATE TABLE predictions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, request_id VARCHAR(32) NOT NULL UNIQUE,
+    created_at DATETIME, image_sha256 VARCHAR(64), prediction VARCHAR(64),
+    calibrated_confidence FLOAT, energy FLOAT, routed_to_review BOOLEAN,
+    reason_low_confidence BOOLEAN, reason_ood BOOLEAN, model_name VARCHAR(128),
+    model_version VARCHAR(32), model_precision VARCHAR(8), latency_ms FLOAT, inference_ms FLOAT,
+    image_bytes INTEGER, image_width INTEGER, image_height INTEGER, image_format VARCHAR(16),
+    brightness FLOAT, contrast FLOAT, sharpness FLOAT, logits JSON)"""
+
+
+def test_an_older_log_gets_reason_audit_false(tmp_path):
+    """A TASK-019 database: the new column is added and earlier rows were never audited."""
+    from sqlalchemy import text
+
+    url = "sqlite:///" + (tmp_path / "old.db").as_posix()
+    old = store.PredictionLog(url)
+    with old.engine.begin() as conn:
+        conn.execute(text(OLD_TABLE))
+        conn.execute(
+            text(
+                "INSERT INTO predictions (request_id, prediction, routed_to_review) "
+                "VALUES ('" + "o" * 32 + "', 'crazing', 1)"
+            )
+        )
+    old.dispose()
+    log = store.PredictionLog(url)
+    log.create_tables()
+    got = log.recent(1)[0]
+    assert got["request_id"] == "o" * 32 and got["reason_audit"] is False
+    log.add(row("n" * 32, routed_to_review=True, reason_audit=True))
+    assert log.recent(1)[0]["reason_audit"] is True
+    assert log.upgrade_schema() == []  # nothing left to add
+    log.dispose()
+
+
+def test_unknown_or_undefaulted_schema_changes_stop(tmp_path):
+    from sqlalchemy import text
+
+    url = "sqlite:///" + (tmp_path / "odd.db").as_posix()
+    odd = store.PredictionLog(url)
+    with odd.engine.begin() as conn:
+        conn.execute(text(OLD_TABLE.replace("logits JSON)", "logits JSON, extra TEXT)")))
+    with pytest.raises(store.SchemaError, match="does not know"):
+        odd.create_tables()
+    odd.dispose()
+    url2 = "sqlite:///" + (tmp_path / "missing.db").as_posix()
+    missing = store.PredictionLog(url2)
+    with missing.engine.begin() as conn:
+        conn.execute(text(OLD_TABLE.replace(", logits JSON)", ")")))
+    with pytest.raises(store.SchemaError, match="no default"):
+        missing.create_tables()
+    missing.dispose()

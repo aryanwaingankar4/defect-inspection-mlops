@@ -19,6 +19,7 @@ from src.config import load_params  # noqa: E402
 from src.db.store import PredictionLog  # noqa: E402
 from src.serving import app as api  # noqa: E402
 from src.serving import bundle as bd  # noqa: E402
+from src.serving import routing  # noqa: E402
 from src.tracking import serving_bundle as sb  # noqa: E402
 from tests import serving_helpers as sh  # noqa: E402
 
@@ -151,7 +152,7 @@ def test_no_champion(client, params):
 
 @pytest.mark.needs_data
 @pytest.mark.needs_model
-def test_real_bundle_reproduces_committed_val_results(database_url):
+def test_real_bundle_reproduces_committed_val_results(database_url, audit_salt):
     """The API on the real bundle gives the classes, calibrated confidences and routing counts
     recorded offline on val (calibrate's CSV from PyTorch; ood.json from the same ONNX file)."""
     bundle_dir = REPO_ROOT / PARAMS["serving"]["bundle_dir"]
@@ -171,7 +172,8 @@ def test_real_bundle_reproduces_committed_val_results(database_url):
         assert m["temperature"] == ood["temperature"]
         assert m["review_threshold"] == ood["review_threshold"]
         assert m["ood_energy_threshold"] == ood["ood_energy_threshold"]
-        low = flagged = routed = 0
+        low = flagged = routed = audited = 0
+        rate = PARAMS["serving"]["audit_rate"]
         for r in rows:
             data = (raw / r["path"]).read_bytes()
             resp = c.post(
@@ -186,9 +188,16 @@ def test_real_bundle_reproduces_committed_val_results(database_url):
             low += "low_confidence" in body["reasons"]
             flagged += "ood" in body["reasons"]
             routed += body["routed_to_review"]
+            audited += "audit" in body["reasons"]
+            # ADR-030: audit only on otherwise accepted images, by the salted request-id hash
+            otherwise_routed = bool({"low_confidence", "ood"} & set(body["reasons"]))
+            expected = not otherwise_routed and routing.audit_selected(
+                body["request_id"], audit_salt, rate
+            )
+            assert ("audit" in body["reasons"]) == expected
     assert PredictionLog(database_url).count() == len(rows)  # one row per prediction
     v = ood["val"]
-    assert (low, flagged, routed) == (
+    assert (low, flagged, routed - audited) == (
         v["routed_low_confidence"],
         v["flagged_ood"],
         v["routed_any_reason"],

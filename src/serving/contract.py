@@ -17,7 +17,10 @@ def openapi_schema(params: Mapping[str, Any]) -> dict[str, Any]:
     """The app's OpenAPI schema (no model, key or database is needed to build it)."""
     from src.serving.app import create_app
 
-    return create_app(params, api_key="schema-only", database_url="sqlite://").openapi()
+    app = create_app(
+        params, api_key="schema-only", database_url="sqlite://", audit_salt="schema-only"
+    )
+    return app.openapi()
 
 
 def render(schema: Mapping[str, Any]) -> bytes:

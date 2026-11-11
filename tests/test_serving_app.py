@@ -20,7 +20,7 @@ from src.config import load_params  # noqa: E402
 from src.db.store import PredictionLog  # noqa: E402
 from src.serving import app as api  # noqa: E402
 from src.serving import bundle as bd  # noqa: E402
-from src.serving import scoring  # noqa: E402
+from src.serving import routing, scoring  # noqa: E402
 from src.serving.features import image_features  # noqa: E402
 from src.serving.json_logging import JsonFormatter  # noqa: E402
 from src.serving.onnx_model import OnnxClassifier  # noqa: E402
@@ -28,7 +28,8 @@ from src.serving.preprocess import PreprocessConfig, load_image, to_model_input 
 from tests import serving_helpers as sh  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PARAMS = load_params(REPO_ROOT / "configs" / "params.yaml")
+REAL_PARAMS = load_params(REPO_ROOT / "configs" / "params.yaml")
+PARAMS = sh.without_audit(REAL_PARAMS)  # exact routing; the audit has its own tests below
 KEY = "test-key-0123456789"
 DARK, MID = 25.0, 124.0  # mean grey levels: confident class vs unsure (both reasons)
 
@@ -185,6 +186,7 @@ def test_predict_applies_temperature_and_scores(client, bundle_dir):
         "temperature": sh.TEMPERATURE,
         "review": sh.REVIEW,
         "ood_energy": sh.OOD,
+        "audit_rate": 0.0,
     }
     assert body["image_sha256"] == hashlib.sha256(data).hexdigest()
     assert body["request_id"] == r.headers["X-Request-ID"] and len(body["request_id"]) == 32
@@ -431,3 +433,63 @@ def test_review_queue_gauge_counts_routed_rows(client, monkeypatch):
     monkeypatch.setattr(client.app.state.db, "review_queue_size", lambda: 1 / 0)
     r = client.get("/metrics")  # a broken database never breaks the scrape
     assert r.status_code == 200 and "defect_api_review_queue_size NaN" in r.text
+
+
+# ---------------------------------------------------------------- random audit (TASK-023, ADR-030)
+
+
+def audit_params(rate: float) -> dict:
+    p = copy.deepcopy(REAL_PARAMS)
+    p["serving"]["audit_rate"] = rate
+    return p
+
+
+def test_refuses_to_start_without_an_audit_salt(bundle_dir, monkeypatch):
+    monkeypatch.delenv("AUDIT_SALT")
+    with pytest.raises(RuntimeError, match="AUDIT_SALT"):
+        api.create_app(REAL_PARAMS, api_key=KEY, bundle_dir=bundle_dir)
+    with pytest.raises(RuntimeError, match="AUDIT_SALT"):
+        api.create_app(REAL_PARAMS, api_key=KEY, bundle_dir=bundle_dir, audit_salt=" ")
+    api.create_app(audit_params(0.0), api_key=KEY, bundle_dir=bundle_dir)  # no audit, no salt
+
+
+@pytest.mark.parametrize("rate", [-0.1, 1.5])
+def test_audit_rate_must_be_a_share(bundle_dir, rate):
+    with pytest.raises(RuntimeError, match="audit_rate"):
+        api.create_app(audit_params(rate), api_key=KEY, bundle_dir=bundle_dir)
+
+
+def test_audit_marks_only_otherwise_accepted_predictions(bundle_dir, database_url):
+    app = api.create_app(audit_params(1.0), api_key=KEY, bundle_dir=bundle_dir)
+    with TestClient(app) as c:
+        accepted = post_image(c, sh.image_bytes(DARK)).json()
+        unsure = post_image(c, sh.image_bytes(MID)).json()
+        text = c.get("/metrics").text
+    assert accepted["reasons"] == ["audit"] and accepted["routed_to_review"] is True
+    assert accepted["thresholds"]["audit_rate"] == 1.0
+    assert unsure["reasons"] == ["low_confidence", "ood"]  # never also "audit"
+    rows = {r["request_id"]: r for r in PredictionLog(database_url).recent(5)}
+    assert rows[accepted["request_id"]]["reason_audit"] is True
+    assert rows[unsure["request_id"]]["reason_audit"] is False
+    assert 'defect_api_routed_reason_total{reason="audit"} 1.0' in text
+    assert "defect_api_review_queue_size 2.0" in text  # audited rows wait for review too
+
+
+def test_audit_decision_is_the_salted_hash_of_the_request_id(bundle_dir, audit_salt):
+    rate = REAL_PARAMS["serving"]["audit_rate"]
+    app = api.create_app(REAL_PARAMS, api_key=KEY, bundle_dir=bundle_dir)
+    with TestClient(app) as c:
+        bodies = [post_image(c, sh.image_bytes(DARK, seed=i)).json() for i in range(40)]
+    for b in bodies:
+        expected = routing.audit_selected(b["request_id"], audit_salt, rate)
+        assert ("audit" in b["reasons"]) == expected
+        assert b["routed_to_review"] == expected
+
+
+def test_audit_salt_is_never_logged(bundle_dir, caplog, audit_salt):
+    caplog.set_level(logging.INFO, logger="src.serving")
+    app = api.create_app(audit_params(1.0), api_key=KEY, bundle_dir=bundle_dir)
+    with TestClient(app) as c:
+        post_image(c, sh.image_bytes(DARK))
+    lines = "\n".join(JsonFormatter().format(r) for r in caplog.records)
+    assert '"audit"' in lines and audit_salt not in lines

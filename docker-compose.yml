@@ -1,6 +1,6 @@
 # Local stack: the API with its SQLite prediction log on a named volume (TASK-021), plus
 # Prometheus and Grafana with a provisioned dashboard (TASK-032).
-# `make docker-up`. API_KEY and GRAFANA_ADMIN_PASSWORD are read from the shell or from .env for
+# `make docker-up`. API_KEY, AUDIT_SALT and GRAFANA_ADMIN_PASSWORD are read from the shell or .env for
 # interpolation only; no env_file, so other .env values (DagsHub credentials) never reach a container.
 # Every port is bound to 127.0.0.1 (local only).
 name: defect-inspection
@@ -11,6 +11,7 @@ services:
     build: .
     environment:
       API_KEY: ${API_KEY:?set API_KEY in .env or the shell}
+      AUDIT_SALT: ${AUDIT_SALT:?set AUDIT_SALT in .env or the shell}
       DATABASE_URL: sqlite:////data/predictions.db
     volumes:
       - predictions:/data

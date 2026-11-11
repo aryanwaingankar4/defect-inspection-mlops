@@ -28,9 +28,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
-from fastapi import FastAPI, File, Request, UploadFile
+from fastapi import FastAPI, File, Request, Security, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from fastapi.security import APIKeyHeader
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
     CollectorRegistry,
@@ -47,11 +48,20 @@ from src.serving import json_logging
 from src.serving.bundle import Bundle, load_bundle
 from src.serving.features import image_features
 from src.serving.preprocess import to_model_input
+from src.serving.routing import with_audit
 from src.serving.scoring import score
 from src.serving.validation import Decoded, InputRejected, ValidationConfig, decode_checked
 
 API_KEY_ENV = "API_KEY"
 API_KEY_HEADER = "X-API-Key"
+AUDIT_SALT_ENV = "AUDIT_SALT"
+# Documents the key in OpenAPI; the check itself runs in the middleware, before the body.
+API_KEY_SCHEME = APIKeyHeader(
+    name=API_KEY_HEADER,
+    scheme_name="ApiKey",
+    description="API key from the API_KEY env var: missing -> 401, wrong -> 403",
+    auto_error=False,
+)
 REQUEST_ID_HEADER = "X-Request-ID"
 PROTECTED = frozenset({"/predict", "/feedback"})
 KNOWN_PATHS = frozenset({"/predict", "/feedback", "/health", "/metrics"})
@@ -79,6 +89,7 @@ class ThresholdInfo(BaseModel):
     temperature: float
     review: float
     ood_energy: float
+    audit_rate: float
 
 
 class PredictResponse(BaseModel):
@@ -87,8 +98,10 @@ class PredictResponse(BaseModel):
     calibrated_confidence: float = Field(description="max softmax(logits / T), ADR-006/025")
     energy: float = Field(description="-T * logsumexp(logits / T); higher = less familiar")
     routed_to_review: bool
-    reasons: list[Literal["low_confidence", "ood"]] = Field(
-        description="why the image goes to review (ADR-023, ADR-027); empty if it does not"
+    reasons: list[Literal["low_confidence", "ood", "audit"]] = Field(
+        description="why the image goes to review: low_confidence and/or ood (ADR-023, "
+        "ADR-027), or audit for a random sample of otherwise accepted images (ADR-030); "
+        "empty if it does not"
     )
     model_version: str
     model: ModelInfo
@@ -271,6 +284,7 @@ def log_row(
         "routed_to_review": result["routed_to_review"],
         "reason_low_confidence": "low_confidence" in result["reasons"],
         "reason_ood": "ood" in result["reasons"],
+        "reason_audit": "audit" in result["reasons"],
         "model_name": info["name"],
         "model_version": info["version"],
         "model_precision": info["precision"],
@@ -294,9 +308,10 @@ def create_app(
     api_key: str | None = None,
     bundle_dir: Path | str | None = None,
     database_url: str | None = None,
+    audit_salt: str | None = None,
 ) -> FastAPI:
-    """Build the app. Refuses to start without an API key or a database URL; the bundle and the
-    prediction log open at startup."""
+    """Build the app. Refuses to start without an API key, a database URL, or (when the audit
+    rate is above 0) an audit salt; the bundle and the prediction log open at startup."""
     api_key = api_key if api_key is not None else os.environ.get(API_KEY_ENV, "")
     if not api_key.strip():
         raise RuntimeError(f"{API_KEY_ENV} is not set: the API refuses to start without it")
@@ -304,6 +319,14 @@ def create_app(
         db_url = database_url or database_url_from_env()
     except DatabaseConfigError as exc:
         raise RuntimeError(f"{exc}: the API refuses to start without it (ADR-029)") from exc
+    audit_rate = float(params["serving"]["audit_rate"])
+    if not 0.0 <= audit_rate <= 1.0:
+        raise RuntimeError(f"serving.audit_rate must be in [0, 1], got {audit_rate}")
+    salt = audit_salt if audit_salt is not None else os.environ.get(AUDIT_SALT_ENV, "")
+    if audit_rate > 0 and not salt.strip():
+        raise RuntimeError(
+            f"{AUDIT_SALT_ENV} is not set and audit_rate > 0: the API refuses to start (ADR-030)"
+        )
     vcfg = ValidationConfig.from_params(params)
     bundle_path = Path(bundle_dir or params["serving"]["bundle_dir"])
     metrics = Metrics()
@@ -441,6 +464,7 @@ def create_app(
         "/predict",
         response_model=PredictResponse,
         responses=error_docs(401, 403, 411, 413, 415, 422, 500, 503),
+        dependencies=[Security(API_KEY_SCHEME)],
     )
     def predict(request: Request, file: UploadFile = File(...)) -> PredictResponse:  # noqa: B008
         start = time.perf_counter()
@@ -451,6 +475,10 @@ def create_app(
             request.state.log["image_sha256"] = hashlib.sha256(data).hexdigest()
         decoded = decode_checked(data, vcfg)
         result, seconds, logits = predict_one(bundle, decoded.image)
+        result["reasons"] = with_audit(
+            result["reasons"], request.state.request_id, salt, audit_rate
+        )
+        result["routed_to_review"] = bool(result["reasons"])
         metrics.inference.observe(seconds)
         metrics.predictions.labels(result["prediction"]).inc()
         metrics.confidence.observe(result["calibrated_confidence"])
@@ -493,6 +521,7 @@ def create_app(
                 temperature=th.temperature,
                 review=th.review_threshold,
                 ood_energy=th.ood_energy_threshold,
+                audit_rate=audit_rate,
             ),
             image_sha256=sha,
             latency_ms=latency_ms,
@@ -503,6 +532,7 @@ def create_app(
         status_code=202,
         response_model=FeedbackResponse,
         responses=error_docs(401, 403, 422, 500, 503),
+        dependencies=[Security(API_KEY_SCHEME)],
     )
     def feedback(request: Request, body: FeedbackRequest) -> FeedbackResponse:
         bundle = ready_bundle(request)

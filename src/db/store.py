@@ -15,6 +15,7 @@ from typing import Any
 from sqlalchemy import Engine, create_engine, func, inspect, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
+from sqlalchemy.schema import CreateColumn
 
 from src.db.models import Base, Prediction
 
@@ -23,6 +24,10 @@ DATABASE_URL_ENV = "DATABASE_URL"
 
 class DatabaseConfigError(RuntimeError):
     pass
+
+
+class SchemaError(RuntimeError):
+    """The existing table differs from the model in a way that needs a real migration."""
 
 
 def database_url_from_env() -> str:
@@ -56,8 +61,28 @@ class PredictionLog:
         self.engine = make_engine(url)
 
     def create_tables(self) -> None:
-        """Create missing tables (Alembic migrations come at TASK-037)."""
+        """Create missing tables, then add missing columns that have a server default
+        (additive only, ADR-030). Anything else stops here: real migrations (Alembic) come at
+        TASK-037."""
         Base.metadata.create_all(self.engine)
+        self.upgrade_schema()
+
+    def upgrade_schema(self) -> list[str]:
+        """Add columns of the model that the table lacks, if each has a server default."""
+        table = Prediction.__table__
+        existing = {c["name"] for c in inspect(self.engine).get_columns(table.name)}
+        missing = [c for c in table.columns if c.name not in existing]
+        unknown = existing - {c.name for c in table.columns}
+        if unknown:
+            raise SchemaError(f"table {table.name} has columns the code does not know: {unknown}")
+        no_default = [c.name for c in missing if c.server_default is None]
+        if no_default:
+            raise SchemaError(f"columns {no_default} are missing and have no default: migrate")
+        with self.engine.begin() as conn:
+            for col in missing:
+                ddl = CreateColumn(col).compile(dialect=self.engine.dialect)
+                conn.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {ddl}"))
+        return [c.name for c in missing]
 
     def ping(self) -> bool:
         try:

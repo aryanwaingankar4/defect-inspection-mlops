@@ -63,7 +63,7 @@ def test_copies_only_the_api_files():
 
 
 def test_no_secrets_or_data_baked_in():
-    for name in ("API_KEY", "DATABASE_URL", "MLFLOW_", "KAGGLE"):
+    for name in ("API_KEY", "AUDIT_SALT", "DATABASE_URL", "MLFLOW_", "KAGGLE"):
         assert not re.search(rf"^(ENV|ARG)\s+.*{name}", DOCKERFILE, re.MULTILINE), name
     assert "data/" not in " ".join(instructions("COPY"))
 
@@ -93,8 +93,9 @@ def test_dockerignore_is_an_allowlist():
 def test_compose_passes_only_the_needed_environment():
     assert "env_file" not in API
     env = API["environment"]
-    assert set(env) == {"API_KEY", "DATABASE_URL"}
+    assert set(env) == {"API_KEY", "AUDIT_SALT", "DATABASE_URL"}
     assert env["API_KEY"].startswith("${API_KEY:?")  # required, never a default value
+    assert env["AUDIT_SALT"].startswith("${AUDIT_SALT:?")  # ADR-030
     assert env["DATABASE_URL"] == "sqlite:////data/predictions.db"
 
 

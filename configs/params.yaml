@@ -154,6 +154,8 @@ serving:                           # src/serving/app.py (TASK-018, ADR-028); no 
   allowed_formats: [JPEG, PNG, BMP]  # format decoded from the bytes (415 otherwise), not the client's content type
   min_side: 32                     # pixels (422 below)
   max_pixels: 16777216             # 4096 x 4096, checked from the header before decoding (422 above)
+  audit_rate: 0.02                 # ADR-007/030: share of otherwise auto-accepted predictions also sent
+                                   # to review, chosen by SHA-256(request_id + AUDIT_SALT); salt from env
   near_blank_max_std: 2.0          # greyscale pixel std below this -> 422 near_blank; set well below every
                                    # NEU train_v1/val image (checked by tests/test_serving_validation.py)
 

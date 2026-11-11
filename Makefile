@@ -24,7 +24,7 @@ MANIFEST := models/serving/manifest.json
 SMOKE_AUDIT_SALT := smoke-test-audit-salt-not-secret
 
 .PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
-	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke monitoring-smoke review-ui stream simulate-review register kaggle-dataset kaggle-push kaggle-status kaggle-output
+	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke monitoring-smoke review-ui stream simulate-review db-reset feedback-export register kaggle-dataset kaggle-push kaggle-status kaggle-output
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -119,7 +119,7 @@ docker-build: ## Build the API image with the serving bundle inside (needs `make
 		--build-arg ONNX_SHA256=$$($(RUN) python -c "import json; print(json.load(open('$(MANIFEST)'))['onnx_sha256'])") \
 		--build-arg GIT_COMMIT=$$(git rev-parse --short HEAD) .
 
-docker-up: docker-build ## API :8000 + Prometheus :9090 + Grafana :3000 on localhost (API_KEY, AUDIT_SALT, GRAFANA_ADMIN_PASSWORD from .env)
+docker-up: docker-build ## API :8000 + Prometheus :9090 + Grafana :3000 (secrets from .env); log in the Docker volume, not data/predictions.db
 	docker compose up -d --no-build
 
 docker-down: ## Stop the Docker stack (volumes are kept)
@@ -131,16 +131,29 @@ docker-smoke: docker-build ## Build, start and check the API container, then rem
 monitoring-smoke: docker-build ## API + Prometheus + Grafana: metrics scraped, dashboard provisioned (TASK-032)
 	AUDIT_SALT=$(SMOKE_AUDIT_SALT) $(RUN) python scripts/monitoring_smoke.py
 
-review-ui: ## Review queue UI on http://127.0.0.1:8501 (REVIEWER_PASSWORD, DATABASE_URL from .env; ADR-031)
+# The review loop (review-ui, simulate-review, feedback-export) reads the LOCAL log from DATABASE_URL
+# (data/predictions.db), which `make serve` writes. The Docker API writes to the `predictions` volume
+# instead, which these targets do not read: run `make serve`, not `make docker-up`, for the loop (ADR-032).
+review-ui: ## Review queue UI on http://127.0.0.1:8501; reads the local log of `make serve`, not the Docker volume (ADR-031/032)
 	$(RUN_UI) $(ENV_FILE) streamlit run src/review/app.py --server.address 127.0.0.1 --server.port 8501 \
 		--browser.gatherUsageStats false -- --config $(PARAMS)
 
 N ?= 40
-stream: ## SIMULATED stream: send N production_stream images to the API (API_KEY from .env). ARGS: --start K
+stream: ## SIMULATED stream: send N production_stream images to the API on :8000 (API_KEY from .env). ARGS: --start K
 	$(RUN) $(ENV_FILE) python -m src.pipelines.stream --config $(PARAMS) -n $(N) $(ARGS)
 
-simulate-review: ## SIMULATED reviewer labels the queue (DATABASE_URL from .env). ARGS: --limit, --error-rate
+simulate-review: ## SIMULATED reviewer labels production_stream images in the local queue. ARGS: --limit, --error-rate
 	$(RUN_SERVE) $(ENV_FILE) python -m src.review.simulated --config $(PARAMS) $(ARGS)
+
+db-reset: ## Move the local SQLite log to data/archive/ and start an empty one (stop serve/review-ui first; ADR-032)
+	$(RUN_SERVE) $(ENV_FILE) python -m src.db.reset --config $(PARAMS)
+
+feedback-export: ## production_stream labels -> data/feedback/feedback.csv (DVC) + results/feedback/ (ADR-032)
+	$(RUN_SERVE) $(ENV_FILE) python -m src.review.export --config $(PARAMS)
+	$(RUN) dvc add data/feedback
+	@echo ""
+	@echo "New feedback version. Commit it and back it up:"
+	@echo "  git add data/feedback.dvc results/feedback/export_report.json && make push"
 
 golden: ## Golden images + expected @champion outputs -> tests/golden/ (needs bundle + NEU val; ADR-017)
 	$(RUN_SERVE) python -m src.serving.golden --config $(PARAMS)

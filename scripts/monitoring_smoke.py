@@ -2,9 +2,12 @@
 check the monitoring path end to end, then remove everything.
 
 Separate compose project, ports, throwaway API key and Grafana password, own volumes. Sends only
-the committed synthetic golden image (ADR-017) and one junk upload. Checks: Prometheus scrapes the
-API (target up), the request, rejection and review-queue metrics arrive with the expected values,
-every dashboard query runs without a PromQL error, Grafana is healthy, the dashboard is
+the committed synthetic golden image (ADR-017), a few generated non-steel images
+(src/data/synthetic_ood.py) and one junk upload. Checks: Prometheus scrapes the API (target up);
+every labelled series exists at 0 before any prediction and the routed-share panel shows no data
+(never infinity); after N predictions the dashboard's own panel queries give exactly the counts
+from the responses (by class summing to N, routed share = routed / N); request, rejection and
+review-queue metrics; every dashboard query runs; Grafana is healthy, the dashboard is
 provisioned, its datasource answers, and anonymous access is refused.
 """
 
@@ -21,9 +24,14 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))  # for src.data.synthetic_ood (numpy + Pillow only)
+
+from src.data.synthetic_ood import generate  # noqa: E402
+
 PROJECT = "defect-inspection-monitoring-smoke"
 PORTS = {"API_PORT": "18001", "PROMETHEUS_PORT": "19090", "GRAFANA_PORT": "13000"}
 API = f"http://127.0.0.1:{PORTS['API_PORT']}"
@@ -31,7 +39,9 @@ PROM = f"http://127.0.0.1:{PORTS['PROMETHEUS_PORT']}"
 GRAFANA = f"http://127.0.0.1:{PORTS['GRAFANA_PORT']}"
 DASHBOARD = ROOT / "monitoring" / "grafana" / "dashboards" / "defect-api.json"
 GOLDEN = ROOT / "tests" / "golden" / "synthetic_golden.png"
-N_GOLDEN = 3  # the golden image is routed (low_confidence), so the queue should reach 3
+N_GOLDEN = 3  # the golden image is routed (low_confidence)
+SYNTHETIC = ["gradient", "stripes", "checkerboard", "shapes", "blobs"]  # mixed routing
+N_CLASSES = 6
 
 
 class SmokeError(RuntimeError):
@@ -89,7 +99,7 @@ def prom_value(expr: str) -> float | None:
     return float(body["data"]["result"][0]["value"][1])
 
 
-def predict(png: bytes, key: str | None) -> int:
+def predict_body(png: bytes, key: str | None) -> tuple[int, dict | None]:
     boundary = uuid.uuid4().hex
     body = (
         (
@@ -102,7 +112,11 @@ def predict(png: bytes, key: str | None) -> int:
     headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
     if key:
         headers["X-API-Key"] = key
-    return http(f"{API}/predict", data=body, headers=headers)[0]
+    return http(f"{API}/predict", data=body, headers=headers)
+
+
+def predict(png: bytes, key: str | None) -> int:
+    return predict_body(png, key)[0]
 
 
 def check(ok: bool, label: str, out: list[str]) -> None:
@@ -110,6 +124,11 @@ def check(ok: bool, label: str, out: list[str]) -> None:
     if not ok:
         print("\n".join(out))
         raise SmokeError(label)
+
+
+def panel_expr(title_start: str) -> str:
+    d = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+    return next(p["targets"][0]["expr"] for p in d["panels"] if p["title"].startswith(title_start))
 
 
 def dashboard_queries() -> list[tuple[str, str]]:
@@ -127,27 +146,67 @@ def run() -> list[str]:
         _, s = wait_for("API health", lambda: (http(f"{API}/health")[0] == 200, None))
         out.append(f"  api healthy after {s:.1f} s")
 
-        png = GOLDEN.read_bytes()
-        codes = [predict(png, key) for _ in range(N_GOLDEN)]
-        codes += [predict(b"not an image", key), predict(png, None)]
-        check(codes == [200] * N_GOLDEN + [422, 401], f"requests sent: {codes}", out)
+        def first_scrape():
+            n_series = prom_value("count(defect_api_predictions_total)")
+            return prom_value('up{job="api"}') == 1 and n_series == N_CLASSES, n_series
+
+        n_series, s = wait_for("the first scrape", first_scrape)
+        out.append(f"  first scrape after {s:.1f} s")
+        check(
+            n_series == N_CLASSES,
+            f"all {N_CLASSES} class series exist at 0 before any request",
+            out,
+        )
+        status, share0 = prom_query(panel_expr("Routed share"))
+        empty = status == 200 and share0["data"]["result"] == []
+        check(empty, "routed share before any prediction: no data (not infinite)", out)
+
+        images = [GOLDEN.read_bytes()] * N_GOLDEN + [png for _, png in generate(SYNTHETIC, 1, 23)]
+        bodies = []
+        for img in images:
+            status, body = predict_body(img, key)
+            check(status == 200, f"prediction {len(bodies) + 1} -> 200", out)
+            bodies.append(body)
+        out[-len(images) :] = [
+            f"  [ok] {len(images)} predictions sent (golden x{N_GOLDEN} + "
+            f"{len(SYNTHETIC)} synthetic)"
+        ]
+        codes = [predict(b"not an image", key), predict(images[0], None)]
+        check(codes == [422, 401], f"bad requests: {codes}", out)
+        n = len(bodies)
+        by_class = Counter(b["prediction"] for b in bodies)
+        n_routed = sum(b["routed_to_review"] for b in bodies)
+        by_reason = Counter(r for b in bodies for r in b["reasons"])
 
         def scraped():
             up = prom_value('up{job="api"}')
             queue = prom_value("defect_api_review_queue_size")
             ok_200 = prom_value('sum(defect_api_requests_total{endpoint="/predict",status="200"})')
-            return (up == 1 and queue == N_GOLDEN and ok_200 == N_GOLDEN), (up, queue, ok_200)
+            return (up == 1 and queue == n_routed and ok_200 == n), (up, queue, ok_200)
 
         (up, queue, ok_200), s = wait_for("Prometheus to scrape the new values", scraped)
         out.append(f"  Prometheus scraped the new values after {s:.1f} s")
         check(up == 1, "Prometheus target api is up", out)
-        check(ok_200 == N_GOLDEN, f"defect_api_requests_total /predict 200 = {ok_200:.0f}", out)
-        check(queue == N_GOLDEN, f"defect_api_review_queue_size = {queue:.0f}", out)
+        check(ok_200 == n, f"defect_api_requests_total /predict 200 = {ok_200:.0f}", out)
+        check(queue == n_routed, f"defect_api_review_queue_size = {queue:.0f} (= routed)", out)
+
+        status, res = prom_query(panel_expr("Predictions by class"))
+        panel = {r["metric"]["prediction"]: float(r["value"][1]) for r in res["data"]["result"]}
+        same = all(panel.get(c, 0.0) == by_class.get(c, 0) for c in set(panel) | set(by_class))
+        check(
+            len(panel) == N_CLASSES and same and sum(panel.values()) == n,
+            f"panel 'Predictions by class' = responses {dict(by_class)}, sums to N = {n}",
+            out,
+        )
+        share = prom_value(panel_expr("Routed share"))
+        exact = share is not None and abs(share - n_routed / n) < 1e-12
+        check(exact, f"panel 'Routed share' = {share} = routed/N = {n_routed}/{n}", out)
+        for reason in ("low_confidence", "ood", "audit"):
+            got = prom_value(f'defect_api_routed_reason_total{{reason="{reason}"}}')
+            check(got == by_reason.get(reason, 0), f"routing reason {reason} = {got:.0f}", out)
         rej = prom_value('defect_api_rejections_total{reason="undecodable"}')
         no_key = prom_value('defect_api_rejections_total{reason="missing_api_key"}')
         check(rej == 1 and no_key == 1, "rejections counted: undecodable 1, missing_api_key 1", out)
-        routed = prom_value('defect_api_routed_reason_total{reason="low_confidence"}')
-        check(routed == N_GOLDEN, f"routing reason low_confidence = {routed:.0f}", out)
 
         bad = []
         for title, expr in dashboard_queries():

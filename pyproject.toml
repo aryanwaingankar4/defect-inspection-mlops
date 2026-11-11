@@ -38,7 +38,9 @@ serve = [
     "sqlalchemy>=2.1.8",
     "uvicorn>=0.54.0",
 ]
-ui = []
+ui = [
+    "streamlit==1.66.1",
+]
 
 [tool.uv]
 package = false

@@ -159,6 +159,16 @@ serving:                           # src/serving/app.py (TASK-018, ADR-028); no 
   near_blank_max_std: 2.0          # greyscale pixel std below this -> 422 near_blank; set well below every
                                    # NEU train_v1/val image (checked by tests/test_serving_validation.py)
 
+review:                            # TASK-024/025 (ADR-031). The reviewer and the stream are SIMULATED
+  simulated:                       # src/review/simulated.py (`make simulate-review`)
+    error_rate: 0.0                # chance of a wrong label (uniform over the other classes); TASK-030: 0 / 0.05 / 0.15
+    seed: 31                       # with the request id: the same labels on every rerun
+    reviewer_id: simulated-reviewer
+    limit: 1000                    # most labels per run
+  stream:                          # src/pipelines/stream.py (`make stream`)
+    split: production_stream       # the only split the stream may send (never test_frozen)
+    seed: 37                       # order of the images
+
 tracking:                          # MLflow (ADR-018), used on the laptop only (ADR-020). Server from env MLFLOW_TRACKING_URI, else local_uri
   experiment: neu-training
   registered_model: steel-defect-classifier

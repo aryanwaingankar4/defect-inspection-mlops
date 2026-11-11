@@ -106,3 +106,16 @@ def test_metric_names_are_stable():
         "defect_api_db_write_failures",
         "defect_api_model_info",
     }
+
+
+def test_every_ratio_is_guarded_against_division_by_zero():
+    """A ratio must show no data, never infinity, when its denominator is 0."""
+    for expr in queries():
+        if " / " in expr:
+            assert expr.rstrip().endswith("> 0)"), expr
+
+
+def test_count_panels_are_exact_counters_not_extrapolated():
+    titles = {p["title"]: p["targets"][0]["expr"] for p in DASHBOARD["panels"]}
+    for title in ("Predictions by class (since API start)", "Routed share (since API start)"):
+        assert "increase(" not in titles[title] and "rate(" not in titles[title], title

@@ -17,7 +17,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateColumn
 
-from src.db.models import Base, Prediction
+from src.db.models import Base, Feedback, Prediction
 
 DATABASE_URL_ENV = "DATABASE_URL"
 
@@ -100,12 +100,53 @@ class PredictionLog:
         with Session(self.engine) as session:
             return int(session.scalar(select(func.count()).select_from(Prediction)) or 0)
 
-    def review_queue_size(self) -> int:
-        """Predictions routed to review. Until feedback is stored (TASK-026) every routed
-        prediction counts as waiting; then it becomes "routed and not yet labelled"."""
+    def _queue_select(self, reason: str | None = None):
+        """Routed predictions without a feedback row (ADR-031)."""
+        query = (
+            select(Prediction)
+            .outerjoin(Feedback, Feedback.request_id == Prediction.request_id)
+            .where(Prediction.routed_to_review, Feedback.id.is_(None))
+        )
+        if reason is not None:
+            column = {
+                "low_confidence": Prediction.reason_low_confidence,
+                "ood": Prediction.reason_ood,
+                "audit": Prediction.reason_audit,
+            }[reason]
+            query = query.where(column)
+        return query
+
+    def review_queue_size(self, reason: str | None = None) -> int:
+        """Predictions routed to review and not yet labelled."""
         with Session(self.engine) as session:
-            query = select(func.count()).select_from(Prediction).where(Prediction.routed_to_review)
-            return int(session.scalar(query) or 0)
+            sub = self._queue_select(reason).subquery()
+            return int(session.scalar(select(func.count()).select_from(sub)) or 0)
+
+    def review_queue(self, limit: int | None = 50, reason: str | None = None) -> list[dict]:
+        """The queue, oldest first."""
+        with Session(self.engine) as session:
+            query = self._queue_select(reason).order_by(Prediction.id)
+            if limit is not None:
+                query = query.limit(limit)
+            return [as_dict(r) for r in session.scalars(query)]
+
+    def prediction(self, request_id: str) -> dict[str, Any] | None:
+        with Session(self.engine) as session:
+            row = session.scalar(select(Prediction).where(Prediction.request_id == request_id))
+            return None if row is None else as_dict(row)
+
+    def add_feedback(self, row: Mapping[str, Any]) -> None:
+        with Session(self.engine) as session, session.begin():
+            session.add(Feedback(**row))
+
+    def feedback_for(self, request_id: str) -> dict[str, Any] | None:
+        with Session(self.engine) as session:
+            row = session.scalar(select(Feedback).where(Feedback.request_id == request_id))
+            return None if row is None else as_dict(row)
+
+    def feedback_count(self) -> int:
+        with Session(self.engine) as session:
+            return int(session.scalar(select(func.count()).select_from(Feedback)) or 0)
 
     def recent(self, n: int = 10) -> list[dict[str, Any]]:
         """The ``n`` newest rows as dicts, newest first (``created_at`` as UTC)."""
@@ -120,8 +161,8 @@ class PredictionLog:
         self.engine.dispose()
 
 
-def as_dict(row: Prediction) -> dict[str, Any]:
-    out = {c.key: getattr(row, c.key) for c in Prediction.__table__.columns}
+def as_dict(row: Prediction | Feedback) -> dict[str, Any]:
+    out = {c.key: getattr(row, c.key) for c in row.__table__.columns}
     created = out["created_at"]
     if created is not None and created.tzinfo is None:  # SQLite drops the zone; it is UTC
         out["created_at"] = created.replace(tzinfo=UTC)

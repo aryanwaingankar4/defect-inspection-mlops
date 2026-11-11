@@ -24,6 +24,8 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
 - **Reason:** Stops errors and feedback bias from compounding across cycles, and keeps each version reproducible.
 
 ## ADR-005 — Statistical promotion gate
+> **Superseded in part by ADR-033 (2026-11-12):** the gate runs on `val` (not `test_frozen`), as a non-inferiority test, without ECE/latency checks.
+
 - **Decision:** Champion and challenger are evaluated on the same `test_frozen` images. Promote only if all of these hold:
   - McNemar's test is significant, or the gain is above a minimum margin (alternative: paired bootstrap CI on macro-F1);
   - no class recall drops by more than the tolerance in `params.yaml`;

@@ -15,8 +15,10 @@ CPU only, no training. Steps:
      champion's T and threshold, and several batch sizes. Any failure: nothing is kept.
 
 Writes ``<export.out_dir>/<model>-v<version>.fp32.onnx`` (git-ignored) and
-``export.report_file``. ``--log-mlflow`` adds both to the champion's MLflow run under ``onnx/``
-and tags the version with ``onnx_sha256`` / ``onnx_artifact`` so serving can verify the file.
+``export.report_file``. ``--log-mlflow`` adds both to the exported version's MLflow run under
+``onnx/`` and tags the version with ``onnx_sha256`` / ``onnx_artifact`` so serving can verify the
+file. The promotion gate (ADR-033) calls ``run`` for ``@challenger`` with the challenger's
+checkpoint (checked against its ``checkpoint_sha256`` tag) and its own report file.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ import argparse
 import json
 import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +53,14 @@ REQUIRED_TAGS = ("model", "checkpoint_sha256", "temperature", "review_threshold"
 
 class ExportError(RuntimeError):
     """The ONNX file must not be kept (no champion, wrong checkpoint, parity failed)."""
+
+
+class ParityError(ExportError):
+    """The export ran but failed the parity check; ``parity`` holds the full result."""
+
+    def __init__(self, parity: Mapping[str, Any]) -> None:
+        super().__init__(f"parity failed, nothing kept: {json.dumps(parity)}")
+        self.parity = dict(parity)
 
 
 @dataclass(frozen=True)
@@ -82,13 +92,20 @@ class ExportConfig:
 
 def champion(params: Mapping[str, Any]) -> dict[str, Any]:
     """The ``@champion`` version (number, run id, tags) from the registry."""
+    return registered_version(params, str(params["promotion"]["champion_alias"]))
+
+
+def registered_version(params: Mapping[str, Any], alias: str) -> dict[str, Any]:
+    """The version holding ``alias`` (number, run id, tags); it must carry the serving tags."""
     from src.tracking import mlflow_tracking as mt  # registry lookup
 
     cfg = mt.TrackingConfig.from_params(params, smoke=False)
-    alias = str(params["promotion"]["champion_alias"])
     found = mt.version_by_alias(cfg, alias)
     if found is None:
-        raise ExportError(f"no @{alias} on {cfg.registered_model}: run `make champion` first")
+        msg = f"no @{alias} on {cfg.registered_model}"
+        if alias == params["promotion"]["champion_alias"]:
+            msg += ": run `make champion` first"
+        raise ExportError(msg)
     missing = [k for k in REQUIRED_TAGS if k not in found["tags"]]
     if missing:
         raise ExportError(f"@{alias} version {found['version']} lacks tags {missing} (ADR-024)")
@@ -111,6 +128,16 @@ def checkpoint_for(
     if sha256_file(path) != champ["tags"]["checkpoint_sha256"]:
         raise ExportError(f"{spec.checkpoint} is not the @{champ['alias']} checkpoint (SHA-256)")
     return spec
+
+
+def checkpoint_at(version: Mapping[str, Any], path: Path) -> ModelSpec:
+    """A checkpoint given by path (e.g. a challenger from Kaggle), only if its SHA-256 is the
+    version's ``checkpoint_sha256`` tag."""
+    if not path.is_file():
+        raise ExportError(f"missing checkpoint {path}")
+    if sha256_file(path) != version["tags"]["checkpoint_sha256"]:
+        raise ExportError(f"{path} is not the @{version['alias']} checkpoint (SHA-256)")
+    return ModelSpec(str(version["tags"]["model"]), path, Path())
 
 
 # ---------------------------------------------------------------- export
@@ -234,13 +261,30 @@ def val_outputs(
 # ---------------------------------------------------------------- run
 
 
-def run(params: Mapping[str, Any], *, log_mlflow: bool = False) -> dict[str, Any]:
+def run(
+    params: Mapping[str, Any],
+    *,
+    log_mlflow: bool = False,
+    alias: str | None = None,
+    checkpoint: Path | None = None,
+    report_file: Path | None = None,
+) -> dict[str, Any]:
+    """Export ``@champion`` (default: the local main checkpoint) or the version holding ``alias``
+    (then ``checkpoint`` is required); ``report_file`` overrides ``export.report_file``."""
     val_split = str(params["train"]["val_split"])
     if val_split == PROTECTED_SPLIT:
         raise ExportError(f"the parity check never uses '{PROTECTED_SPLIT}'")
     cfg = ExportConfig.from_params(params)
-    champ = champion(params)
-    spec = checkpoint_for(params, champ)
+    if report_file is not None:
+        cfg = replace(cfg, report_file=Path(report_file))
+    if alias is None:
+        champ = champion(params)
+        spec = checkpoint_for(params, champ)
+    else:
+        if checkpoint is None:
+            raise ExportError(f"exporting @{alias} needs its checkpoint path")
+        champ = registered_version(params, alias)
+        spec = checkpoint_at(champ, Path(checkpoint))
     model, classes, timm_name = load_checkpoint(spec.checkpoint)
     pre = PreprocessConfig.from_params(params)
     temperature, threshold = (
@@ -284,7 +328,7 @@ def run(params: Mapping[str, Any], *, log_mlflow: bool = False) -> dict[str, Any
         parity["val_accuracy_torch"] = float((ref.argmax(axis=1) == y).mean())
         parity["val_accuracy_onnx"] = float((got.argmax(axis=1) == y).mean())
         if not (parity["passed"] and all(b["passed"] for b in parity["batch_check"])):
-            raise ExportError(f"parity failed, nothing kept: {json.dumps(parity)}")
+            raise ParityError(parity)
     except Exception:
         part.unlink(missing_ok=True)
         raise

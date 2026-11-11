@@ -24,7 +24,7 @@ MANIFEST := models/serving/manifest.json
 SMOKE_AUDIT_SALT := smoke-test-audit-salt-not-secret
 
 .PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
-	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke monitoring-smoke review-ui stream simulate-review db-reset feedback-export register kaggle-dataset kaggle-push kaggle-status kaggle-output
+	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke monitoring-smoke review-ui stream simulate-review db-reset feedback-export gate register kaggle-dataset kaggle-push kaggle-status kaggle-output
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -163,6 +163,9 @@ openapi-snapshot: ## Rewrite the API contract tests/contract/openapi.json (only 
 
 champion: ## Set the first @champion with linked evidence (ADR-024). Dry run; ARGS=--apply writes
 	$(RUN_TRAIN) $(ENV_FILE) python -m src.tracking.promote --config $(PARAMS) $(ARGS)
+
+gate: ## Non-inferiority gate @challenger vs @champion on val (ADR-033). ARGS: --challenger-checkpoint P [--apply]
+	$(RUN_TRAIN) $(ENV_FILE) python -m src.tracking.gate --config $(PARAMS) $(ARGS)
 
 register: ## Publish the downloaded Kaggle run to MLflow. ARGS: --register, --role comparison, --results-dir DIR (ADR-020)
 	$(RUN_TRAIN) $(ENV_FILE) python -m src.tracking.publish --config $(PARAMS) $(ARGS)

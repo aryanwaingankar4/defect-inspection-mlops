@@ -13,6 +13,9 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
+TEST_SPLIT = "test_frozen"
+PRODUCTION_SPLIT = "production_stream"  # the only split the loop may label or export (ADR-032)
+
 
 @dataclass(frozen=True)
 class ArchiveEntry:
@@ -47,7 +50,7 @@ class ImageArchive:
                 # byte-identical copies of one class: keep the first; any split membership counts
                 splits = {e.split for e in items}
                 first = items[0]
-                split = "test_frozen" if "test_frozen" in splits else first.split
+                split = TEST_SPLIT if TEST_SPLIT in splits else first.split
                 entries[sha] = ArchiveEntry(first.path, first.label, split)
         return cls(entries, ambiguous)
 

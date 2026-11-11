@@ -3,8 +3,9 @@
 For each queued prediction (oldest first, up to a limit) it takes the true NEU label of the archive
 file with that hash and, with probability ``error_rate``, replaces it with a class drawn uniformly
 from the other classes. The draw is seeded by ``seed`` and the request id, so a rerun gives the
-same labels in any order. It never labels a ``test_frozen`` image (that would leak test images into
-retraining) and skips images without a unique ground truth.
+same labels in any order. It labels only images whose hash is in ``production_stream`` (ADR-032):
+``test_frozen`` images (that would leak test images into retraining) and images of any other split
+are skipped and counted, as are images without a unique ground truth.
 
     make simulate-review                 # params.yaml -> review.simulated
     make simulate-review ARGS="--limit 20 --error-rate 0.05"
@@ -22,10 +23,8 @@ from typing import Any
 
 from src.config import load_params
 from src.db.store import PredictionLog, database_url_from_env
-from src.review.archive import ImageArchive
+from src.review.archive import PRODUCTION_SPLIT, TEST_SPLIT, ImageArchive
 from src.review.queue import class_names, submit
-
-TEST_SPLIT = "test_frozen"
 
 
 @dataclass(frozen=True)
@@ -80,6 +79,9 @@ def run(
         if entry is None or entry.label not in classes:
             counts["skipped_no_ground_truth"] += 1
             continue
+        if entry.split != PRODUCTION_SPLIT:
+            counts["skipped_not_production_stream"] += 1
+            continue
         label, flipped = simulated_label(
             entry.label, classes, cfg.error_rate, cfg.seed, item["request_id"]
         )
@@ -103,6 +105,7 @@ def run(
         "flipped": counts["flipped"],
         "skipped_test_frozen": counts["skipped_test_frozen"],
         "skipped_no_ground_truth": counts["skipped_no_ground_truth"],
+        "skipped_not_production_stream": counts["skipped_not_production_stream"],
         "queue_left": db.review_queue_size(),
     }
 

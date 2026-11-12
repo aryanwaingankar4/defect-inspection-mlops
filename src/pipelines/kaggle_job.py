@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -163,11 +164,24 @@ def build_kernel_dir(
     return out_dir
 
 
+def drop_empty_kaggle_env(environ: dict[str, str] | None = None) -> list[str]:
+    """Remove empty ``KAGGLE_*`` variables (e.g. blank lines copied into .env): the client would
+    prefer them over ~/.kaggle/kaggle.json and run with an empty username. Names only."""
+    env = os.environ if environ is None else environ
+    empty = [k for k in list(env) if k.startswith("KAGGLE_") and not env[k].strip()]
+    for k in empty:
+        del env[k]
+    return empty
+
+
 def _api() -> Any:
+    drop_empty_kaggle_env()
     from kaggle.api.kaggle_api_extended import KaggleApi  # lazy: import needs credentials
 
     api = KaggleApi()
     api.authenticate()
+    if not api.get_config_value("username"):
+        raise LaunchError("Kaggle username is empty: check ~/.kaggle/kaggle.json")
     return api
 
 

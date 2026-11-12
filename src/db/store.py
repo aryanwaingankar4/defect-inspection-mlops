@@ -12,7 +12,7 @@ from datetime import UTC
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Engine, create_engine, func, inspect, select, text
+from sqlalchemy import Engine, case, create_engine, func, inspect, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateColumn
@@ -165,6 +165,41 @@ class PredictionLog:
         )
         with Session(self.engine) as session:
             return [dict(r._mapping) for r in session.execute(query)]
+
+    def loop_counts(self) -> dict[str, Any]:
+        """Counts for the loop report (ADR-036): predictions and routed per model version, and
+        label rows per reviewer kind / simulated error rate / flipped. The flip count is for
+        reporting only; the export never reads it (ADR-032)."""
+        with Session(self.engine) as session:
+            preds = session.execute(
+                select(
+                    Prediction.model_version,
+                    func.count(),
+                    func.sum(case((Prediction.routed_to_review, 1), else_=0)),
+                ).group_by(Prediction.model_version)
+            )
+            labels = session.execute(
+                select(
+                    Feedback.reviewer_kind,
+                    Feedback.simulated_error_rate,
+                    func.count(),
+                    func.sum(case((Feedback.simulated_flipped, 1), else_=0)),
+                ).group_by(Feedback.reviewer_kind, Feedback.simulated_error_rate)
+            )
+            return {
+                "predictions": {
+                    str(v): {"n": int(n), "routed_to_review": int(r or 0)} for v, n, r in preds
+                },
+                "labels": [
+                    {
+                        "reviewer_kind": kind,
+                        "simulated_error_rate": rate,
+                        "n": int(n),
+                        "simulated_flipped": int(f or 0),
+                    }
+                    for kind, rate, n, f in labels
+                ],
+            }
 
     def recent(self, n: int = 10) -> list[dict[str, Any]]:
         """The ``n`` newest rows as dicts, newest first (``created_at`` as UTC)."""

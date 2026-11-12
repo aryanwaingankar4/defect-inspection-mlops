@@ -28,7 +28,7 @@ import mlflow
 
 from src.config import load_params
 from src.tracking import mlflow_tracking as mt
-from src.tracking.gate import next_free, version_checkpoint
+from src.tracking.gate import is_fault_injection, next_free, version_checkpoint
 from src.tracking.promote import append_log
 from src.tracking.serving_bundle import FILE_TAGS, VALUE_TAGS
 
@@ -51,6 +51,8 @@ def _sha256(path: Path) -> str:
 def readiness(params: Mapping[str, Any], version: str, tags: Mapping[str, str]) -> dict[str, Any]:
     """Each check with its result; ``problems`` lists the failures (empty = servable)."""
     problems = []
+    if is_fault_injection(tags):
+        problems.append("it is a fault-injection version (fault_injection=true, ADR-036)")
     ckpt = version_checkpoint(params, version)
     if not ckpt.is_file():
         problems.append(f"no kept checkpoint {ckpt.as_posix()}")

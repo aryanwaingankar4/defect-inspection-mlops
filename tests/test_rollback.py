@@ -158,3 +158,12 @@ def test_readiness_uses_the_serving_bundle_tags():
     from src.tracking.serving_bundle import VALUE_TAGS
 
     assert set(VALUE_TAGS) == {"temperature", "review_threshold", "ood_energy_threshold"}
+
+
+def test_rollback_and_regating_refuse_a_fault_injection_version(reg):
+    reg["client"].set_model_version_tag(reg["name"], "1", "fault_injection", "true")
+    with pytest.raises(rb.RollbackError, match="fault-injection"):
+        rb.rollback(reg["params"], client=reg["client"], now=NOW)
+    with pytest.raises(rb.RollbackError, match="fault-injection"):
+        rb.set_challenger(reg["params"], "1", client=reg["client"])
+    assert aliases(reg) == {"champion": "2"} and log(reg) == []

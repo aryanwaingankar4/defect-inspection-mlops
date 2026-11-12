@@ -216,6 +216,25 @@ retrain:                           # src/pipelines/retrain.py (TASK-028, ADR-034
   poll_seconds: 60                 # Kaggle status poll interval
   timeout_minutes: 180             # stop waiting for Kaggle after this (a rerun resumes the wait)
 
+loop:                              # src/pipelines/loop.py (TASK-030, ADR-036). Stream and reviewer are SIMULATED
+  pilot:                           # cycle 1 (ADR-034): all 1,110 stream images through v2, 67 labelled
+    cycle_record: results/retrain/cycle_e7f25858ed574f3db2e2f37c4168cadb.json
+    gate_file: results/promotion/gate_3.json
+  chunks_file: data/splits/loop_chunks.csv   # committed: order,path,chunk (paths only, no pixels)
+  chunks:                          # cut in this order from the stream order after removing the pilot's labelled images.
+    cycle2: 520                    # NOT brand-new traffic: v2 predicted all of them in the pilot (none labelled)
+    cycle3: 523
+  out_dir: results/loop            # cycle_<n>/ (stream, review, export report, cycle.json), summary, README table
+  fault_injection:                 # one clearly labelled run with a BROKEN simulated reviewer; never promoted
+    rule: shift_to_next_class      # every label -> next class in sorted class order (cyclic)
+    out_dir: data/feedback_fault   # git-ignored, never DVC-tracked: not part of the feedback history
+    report: results/loop/fault_injection/export_report.json
+    feedback_dataset_slug: neu-feedback-fault-private   # PRIVATE, separate from neu-feedback-private
+    feedback_dataset_title: NEU feedback fault injection
+    feedback_staging_dir: build/kaggle-feedback-fault
+    state_dir: build/retrain-fault
+  final_out: results/loop/final_test_frozen.json   # report only: v2 vs final @champion on test_frozen
+
 near_duplicates:
   hash_size: 8                     # pHash bits = hash_size^2 = 64
   max_distance: 8                  # cross-split pairs with Hamming distance <= this go to the CSV

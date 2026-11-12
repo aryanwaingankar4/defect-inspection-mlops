@@ -6,6 +6,10 @@ from env ``API_KEY`` and is never printed. Standard library only.
 
     make stream N=40                     # first 40 images of the seeded order
     make stream N=40 ARGS="--start 40"   # the next 40
+    make stream ARGS="--chunk cycle2 --out results/loop/cycle_2/stream.json"   # TASK-030 (ADR-036)
+
+A chunk (``loop.chunks_file``) is a disjoint slice of the same seeded order; the ``pilot`` chunk
+(images labelled in cycle 1) is never sent again.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ from typing import Any
 from src.config import load_params
 
 STREAM_SPLIT = "production_stream"
+PILOT_CHUNK = "pilot"
 
 
 class StreamError(RuntimeError):
@@ -42,6 +47,21 @@ def stream_order(params: Mapping[str, Any]) -> list[dict[str, str]]:
         rows = [r for r in csv.DictReader(f) if r["split"] == STREAM_SPLIT]
     rows.sort(key=lambda r: r["path"])
     random.Random(int(cfg["seed"])).shuffle(rows)
+    return rows
+
+
+def chunk_rows(params: Mapping[str, Any], chunk: str) -> list[dict[str, str]]:
+    """The rows of one chunk of ``loop.chunks_file``, in stream order (ADR-036)."""
+    if chunk == PILOT_CHUNK:
+        raise StreamError("the pilot chunk was labelled in cycle 1 and is never sent again")
+    with Path(params["loop"]["chunks_file"]).open(encoding="utf-8", newline="") as f:
+        assigned = list(csv.DictReader(f))
+    order = stream_order(params)
+    if [r["path"] for r in assigned] != [r["path"] for r in order]:
+        raise StreamError("the chunks file does not follow the stream order: run make loop-chunks")
+    rows = [r for r, a in zip(order, assigned, strict=True) if a["chunk"] == chunk]
+    if not rows:
+        raise StreamError(f"no chunk {chunk!r} in {params['loop']['chunks_file']}")
     return rows
 
 
@@ -64,24 +84,33 @@ def post_image(url: str, key: str, data: bytes, name: str) -> tuple[int, dict]:
         return e.code, json.loads(e.read() or b"{}")
 
 
-def send(params: Mapping[str, Any], url: str, key: str, n: int, start: int) -> dict[str, Any]:
-    rows = stream_order(params)[start : start + n]
+def send(
+    params: Mapping[str, Any], url: str, key: str, n: int, start: int, chunk: str | None = None
+) -> dict[str, Any]:
+    rows = chunk_rows(params, chunk) if chunk else stream_order(params)[start : start + n]
     raw = Path(params["data"]["raw_dir"])
     statuses: Counter[int] = Counter()
     reasons: Counter[str] = Counter()
+    routed = 0
     for row in rows:
         status, body = post_image(url, key, (raw / row["path"]).read_bytes(), "stream.jpg")
         statuses[status] += 1
         if status == 200:
+            routed += bool(body.get("routed_to_review"))
             for reason in body["reasons"] or ["accepted"]:
                 reasons[reason] += 1
-    return {
+    out = {
         "stream": f"simulated, {STREAM_SPLIT} (ADR-031)",
-        "start": start,
+        "start": None if chunk else start,
+        "chunk": chunk,
         "sent": len(rows),
         "statuses": dict(sorted(statuses.items())),
+        "routed_to_review": routed,
         "accepted_or_reasons": dict(sorted(reasons.items())),
     }
+    if chunk:
+        out["note"] = "not brand-new traffic: v2 predicted these images in the pilot (ADR-036)"
+    return out
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -90,11 +119,19 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--url", default="http://127.0.0.1:8000")
     parser.add_argument("-n", type=int, default=40)
     parser.add_argument("--start", type=int, default=0)
+    parser.add_argument("--chunk", help="send this whole chunk of loop.chunks_file (ADR-036)")
+    parser.add_argument("--out", type=Path, help="also write the summary to this JSON file")
     args = parser.parse_args(argv)
     key = os.environ.get("API_KEY", "")
     if not key:
         sys.exit("API_KEY is not set (make stream loads it from .env)")
-    summary = send(load_params(args.config), args.url, key, args.n, args.start)
+    try:
+        summary = send(load_params(args.config), args.url, key, args.n, args.start, args.chunk)
+    except StreamError as exc:
+        sys.exit(f"stream: {exc}")
+    if args.out:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_bytes((json.dumps(summary, indent=2) + "\n").encode())
     print("SIMULATED stream:", json.dumps(summary))
 
 

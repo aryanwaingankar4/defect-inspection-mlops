@@ -19,6 +19,7 @@ import random
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from src.config import load_params
@@ -68,6 +69,7 @@ def run(
 ) -> dict[str, Any]:
     """Label up to ``cfg.limit`` queued predictions; returns counts (no labels, no pixels)."""
     counts: Counter[str] = Counter()
+    queue_before = db.review_queue_size()
     for item in db.review_queue(limit=None):
         if counts["labelled"] >= cfg.limit:
             break
@@ -101,6 +103,7 @@ def run(
         "reviewer": "simulated (ADR-031)",
         "error_rate": cfg.error_rate,
         "seed": cfg.seed,
+        "queue_before": queue_before,
         "labelled": counts["labelled"],
         "flipped": counts["flipped"],
         "skipped_test_frozen": counts["skipped_test_frozen"],
@@ -115,6 +118,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--config", default="configs/params.yaml")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--error-rate", type=float)
+    parser.add_argument("--out", type=Path, help="also write the summary to this JSON file")
     args = parser.parse_args(argv)
     params = load_params(args.config)
     cfg = SimConfig.from_params(params, limit=args.limit, error_rate=args.error_rate)
@@ -125,6 +129,9 @@ def main(argv: list[str] | None = None) -> None:
         summary = run(db, archive, class_names(params), cfg)
     finally:
         db.dispose()
+    if args.out:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_bytes((json.dumps(summary, indent=2) + "\n").encode())
     print("SIMULATED reviewer (no real inspector):", json.dumps(summary))
 
 

@@ -24,6 +24,12 @@ Steps:
   gate              promotion gate in RECORD mode: gate file only, @champion never moves here
   record            ``results/retrain/cycle_<run_uid>.json``
 
+``--fault-injection`` (TASK-030, ADR-036) runs the same steps on the BROKEN-reviewer copy of the
+export (``make fault-export``): its own state folder and private Kaggle dataset, the version tagged
+``fault_injection=true`` from registration on, the gate in record mode only (``gate --apply``
+refuses such a version), and a last ``release`` step that gives ``@challenger`` back to its
+previous holder (or removes it).
+
 The Kaggle job holds no credentials (ADR-020): only the laptop talks to MLflow and Kaggle's API.
 """
 
@@ -58,9 +64,11 @@ STEPS = (
     "gate",
     "record",
 )
+FAULT_STEPS = (*STEPS, "release")  # ADR-036: the fault-injection run never keeps @challenger
 ACTIVE = {"queued", "running", "new", "pending"}
 FAILED = {"error", "cancelrequested", "cancelacknowledged", "cancelled", "canceled"}
 DECISION_RECORD = "ADR-034"
+FAULT_TAG = "fault_injection"  # same tag as src.tracking.gate.FAULT_TAG (ADR-036)
 
 
 class RetrainError(RuntimeError):
@@ -173,8 +181,31 @@ def wait_for_kaggle(
             raise RetrainError(f"Kaggle run not finished after {timeout_s / 60:.0f} min ({s})")
 
 
-def challenger_tags(metrics: Mapping[str, Any], temperature: float, threshold: float) -> dict:
+def fault_params(params: Mapping[str, Any]) -> dict[str, Any]:
+    """``params`` pointed at the fault-injection copy: its export, Kaggle dataset and state folder
+    (ADR-036). The real export, ``neu-feedback-private`` and ``build/retrain`` are not touched."""
+    f = params["loop"]["fault_injection"]
+    p = copy.deepcopy(dict(params))
+    p["review"]["export"] = {
+        **p["review"]["export"],
+        "out_dir": f["out_dir"],
+        "report": f["report"],
+    }
+    p["kaggle"] = {
+        **p["kaggle"],
+        "feedback_dataset_slug": f["feedback_dataset_slug"],
+        "feedback_dataset_title": f["feedback_dataset_title"],
+        "feedback_staging_dir": f["feedback_staging_dir"],
+    }
+    p["retrain"] = {**p["retrain"], "state_dir": f["state_dir"]}
+    return p
+
+
+def challenger_tags(
+    metrics: Mapping[str, Any], temperature: float, threshold: float, fault: bool = False
+) -> dict:
     fb = metrics["feedback"]
+    extra = {FAULT_TAG: "true"} if fault else {}
     return {
         "role": "challenger",
         "model": metrics["model"],
@@ -185,14 +216,23 @@ def challenger_tags(metrics: Mapping[str, Any], temperature: float, threshold: f
         "feedback_rows": str(fb["rows"]),
         "train_run_uid": metrics["run_uid"],
         "decision_record": DECISION_RECORD,
+        **extra,
     }
 
 
 def cycle_record(state: State, gate_record: Mapping[str, Any], gate_file: str) -> dict[str, Any]:
     d = state.data
+    fault = bool(d.get("fault_injection"))
+    note = "SIMULATED stream and SIMULATED reviewer (ADR-031); real Kaggle GPU training"
+    if fault:
+        note = (
+            "FAULT INJECTION (ADR-036): trained on a BROKEN simulated reviewer's labels (every "
+            "label shifted to the next class); never promoted. " + note
+        )
     return {
         "decision_record": DECISION_RECORD,
-        "note": "SIMULATED stream and SIMULATED reviewer (ADR-031); real Kaggle GPU training",
+        "fault_injection": fault,
+        "note": note,
         "commit": d["commit"],
         "feedback": {"md5": d["feedback_md5"], "rows": d["feedback_rows"]},
         "feedback_per_class": d["feedback_per_class"],
@@ -222,7 +262,7 @@ def cycle_record(state: State, gate_record: Mapping[str, Any], gate_file: str) -
 # ---------------------------------------------------------------- steps (side effects)
 
 
-def step_preflight(params: Mapping[str, Any], state: State) -> None:
+def step_preflight(params: Mapping[str, Any], state: State, fault: bool = False) -> None:
     from src.pipelines import kaggle_job as kj
     from src.training import export_onnx as ex
 
@@ -239,6 +279,7 @@ def step_preflight(params: Mapping[str, Any], state: State) -> None:
         feedback_per_class=export["report"]["per_class"],
         champion_version=champ["version"],
         champion_checkpoint=kept.as_posix(),
+        fault_injection=fault,
     )
 
 
@@ -328,6 +369,11 @@ def step_register(params: Mapping[str, Any], state: State) -> None:
     run_dir, ckpt = output_paths(params)
     record = pb.publish(params, run_dir, ckpt, role="candidate", register=True)
     version = str(record["registered_version"])
+    if state.data.get("fault_injection"):  # tagged before anything else can use the version
+        from src.tracking import mlflow_tracking as mt
+
+        cfg = mt.TrackingConfig.from_params(params, smoke=False)
+        mt.set_version_tags(cfg, version, {FAULT_TAG: "true"})
     results = Path(params["retrain"]["results_dir"]) / state["run_uid"]
     pb.copy_results(run_dir, results)
     kept = version_checkpoint(params, version)
@@ -392,7 +438,12 @@ def step_challenger(params: Mapping[str, Any], state: State) -> None:
     mt.set_version_tags(
         cfg,
         state["version"],
-        challenger_tags(metrics, state["temperature"], state["review_threshold"]),
+        challenger_tags(
+            metrics,
+            state["temperature"],
+            state["review_threshold"],
+            fault=bool(state.data.get("fault_injection")),
+        ),
     )
     alias = str(params["promotion"]["challenger_alias"])
     before = mt.move_alias(cfg, alias, state["version"])  # tags first, alias last
@@ -479,6 +530,23 @@ def step_record(params: Mapping[str, Any], state: State) -> Path:
     return out
 
 
+def step_release(params: Mapping[str, Any], state: State) -> None:
+    """Fault injection only: ``@challenger`` back to its previous holder, or removed (ADR-036)."""
+    from src.tracking import mlflow_tracking as mt
+
+    cfg = mt.TrackingConfig.from_params(params, smoke=False)
+    alias = str(params["promotion"]["challenger_alias"])
+    holder = mt.version_by_alias(cfg, alias)
+    if holder is None or holder["version"] != state["version"]:
+        raise RetrainError(f"@{alias} no longer points at fault version v{state['version']}")
+    before = state.data.get("previous_challenger")
+    if before:
+        mt.move_alias(cfg, alias, before)
+    else:
+        mt.delete_alias(cfg, alias)
+    state.finish("release", challenger_after_release=before)
+
+
 # ---------------------------------------------------------------- run
 
 
@@ -488,13 +556,21 @@ def kaggle_api() -> Any:
     return _api()
 
 
-def run(params: Mapping[str, Any], *, fresh: bool = False, api_factory=kaggle_api) -> State:
+def run(
+    params: Mapping[str, Any],
+    *,
+    fresh: bool = False,
+    api_factory=kaggle_api,
+    fault: bool = False,
+) -> State:
+    if fault:
+        params = fault_params(params)
     state_path = Path(params["retrain"]["state_dir"]) / "state.json"
     if fresh and state_path.exists():
         state_path.unlink()
     state = State.load(state_path)
-    if state.done("record"):
-        raise RetrainError(f"this cycle is finished ({state['cycle_file']}): use --fresh")
+    if state.done("release" if fault else "record"):
+        raise RetrainError(f"this cycle is finished ({state.data.get('cycle_file')}): use --fresh")
     api = None
 
     def kaggle() -> Any:
@@ -503,7 +579,7 @@ def run(params: Mapping[str, Any], *, fresh: bool = False, api_factory=kaggle_ap
         return api
 
     steps: dict[str, Callable[[], Any]] = {
-        "preflight": lambda: step_preflight(params, state),
+        "preflight": lambda: step_preflight(params, state, fault),
         "feedback_dataset": lambda: step_feedback_dataset(params, state, kaggle()),
         "push": lambda: step_push(params, state, kaggle()),
         "wait": lambda: step_wait(params, state, kaggle()),
@@ -515,8 +591,11 @@ def run(params: Mapping[str, Any], *, fresh: bool = False, api_factory=kaggle_ap
         "versions": lambda: step_versions(params, state),
         "gate": lambda: step_gate(params, state),
         "record": lambda: step_record(params, state),
+        "release": lambda: step_release(params, state),
     }
-    for name in STEPS:
+    if state.data.get("fault_injection", fault) != fault:
+        raise RetrainError("the saved progress is from another kind of run: use --fresh")
+    for name in FAULT_STEPS if fault else STEPS:
         if state.done(name):
             print(f"[done] {name}", flush=True)
             continue
@@ -532,13 +611,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--config", type=Path, default=Path("configs/params.yaml"))
     parser.add_argument("--fresh", action="store_true", help="forget saved progress")
+    parser.add_argument(
+        "--fault-injection", action="store_true", help="BROKEN-reviewer run, never promoted"
+    )
     args = parser.parse_args(argv)
     try:
-        state = run(load_params(args.config), fresh=args.fresh)
+        state = run(load_params(args.config), fresh=args.fresh, fault=args.fault_injection)
     except RetrainError as exc:
         print(f"retrain: {exc} (fix it and rerun: the flow resumes)", file=sys.stderr)
         return 1
     d = state.data
+    if args.fault_injection:
+        print("FAULT-INJECTION run (ADR-036): never promoted; @challenger released")
     print(
         f"SIMULATED-loop cycle done: {d['feedback_rows']} feedback rows -> challenger "
         f"v{d['version']}; Kaggle {d['kaggle_wall_time_s']} s; gate (record only) -> "

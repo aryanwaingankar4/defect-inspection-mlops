@@ -497,3 +497,12 @@ def test_loop_counts(tmp_path):
     assert c["labels"] == [
         {"reviewer_kind": "simulated", "simulated_error_rate": 0.05, "n": 2, "simulated_flipped": 1}
     ]
+
+
+def test_re_recording_a_cycle_uses_its_saved_export_report(loop_files):
+    params, _, applied = loop_files
+    first = lp.record_cycle(params, "2", applied, COUNTS)
+    write_export(  # a later cycle exports again
+        Path(params["review"]["export"]["out_dir"]), [], Path(params["review"]["export"]["report"])
+    )
+    assert lp.record_cycle(params, "2", applied, COUNTS) == first

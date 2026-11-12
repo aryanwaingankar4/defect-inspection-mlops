@@ -249,12 +249,13 @@ def record_cycle(
         if fault
         else params["review"]["export"]["report"]
     )
+    saved = folder / "export_report.json"
+    if not fault and saved.is_file():  # re-recording: the copy made when the cycle ran
+        report_src = saved
     report = read_json(report_src)
     if report["csv_md5"] != retrain["feedback"]["md5"]:
         raise LoopError(f"{report_src} is not the export v{version} was trained on (MD5)")
     folder.mkdir(parents=True, exist_ok=True)
-    if not fault:
-        shutil.copyfile(report_src, folder / "export_report.json")
     if cycle == "1" and not (folder / "stream.json").is_file():  # read once, before cycle 2
         if db_counts is None:
             raise LoopError("the pilot record needs the prediction log (DATABASE_URL)")
@@ -308,6 +309,8 @@ def record_cycle(
         "applied_in": gate_file.as_posix() if gate["applied"] else applied_in(params, version),
         "prediction_log_counts": None if fault else db_counts,
     }
+    if not fault and report_src != saved:  # only once every check has passed
+        shutil.copyfile(report_src, saved)
     write_json(folder / "cycle.json", record)
     return record
 

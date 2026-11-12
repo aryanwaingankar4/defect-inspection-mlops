@@ -97,7 +97,8 @@ The Docker stack (`make docker-up`) keeps its own log in the Docker volume `pred
 
 - **Cycle 1 (pilot):** every `production_stream` image went through v2, and the images it routed were labelled.
 - **Cycles 2 and 3:** each streams a disjoint chunk of the images the pilot did not label (`data/splits/loop_chunks.csv`, `make stream ARGS="--chunk cycleN"`). These are **not brand-new traffic**: v2 already predicted them in the pilot, but none of them was labelled or trained on. Cycle 3's simulated reviewer gives a wrong label 5% of the time.
-- **Fault-injection run (labelled as such):** a broken reviewer moves every label to the next class. It works on a copy (`make fault-export`) that never enters the feedback history. The model is tagged `fault_injection=true`, and the gate runs in record mode only; `gate --apply` refuses such a version.
+- **Fault-injection run (labelled as such):** a broken reviewer moves every label to the next class. It works on a copy (`make fault-export`) that never enters the feedback history. The model is tagged `fault_injection=true`, and the gate runs in record mode only; `gate --apply` refuses such a version. In the actual run the gate was never reached: the review-threshold risk check (ADR-023) stopped the model first. The table records that outcome as it happened.
+- **Calibration (ADR-037):** if a retrained model's temperature fit lands on its range bound (for example with zero val errors), it inherits the champion's T and is tagged `calibration=inherited_T`. This rule was added after cycle 2 exposed the gap.
 
 ## Documentation
 

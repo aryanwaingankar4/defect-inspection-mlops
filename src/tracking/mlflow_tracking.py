@@ -315,6 +315,14 @@ def set_version_tags(cfg: TrackingConfig, version: str, tags: Mapping[str, Any])
         client.set_model_version_tag(cfg.registered_model, version, key, str(value))
 
 
+def move_alias(cfg: TrackingConfig, alias: str, version: str) -> str | None:
+    """Point ``registered_model@alias`` at ``version``; returns the version that held it."""
+    client = mlflow.MlflowClient(tracking_uri=resolve_tracking_uri(cfg.local_uri))
+    before = client.get_registered_model(cfg.registered_model).aliases.get(alias)
+    client.set_registered_model_alias(cfg.registered_model, alias, version)
+    return None if before is None else str(before)
+
+
 def download_run_artifact(cfg: TrackingConfig, run_id: str, artifact: str, dst: Path) -> Path:
     """Download one artifact of a run into ``dst``; returns the local path."""
     client = mlflow.MlflowClient(tracking_uri=resolve_tracking_uri(cfg.local_uri))

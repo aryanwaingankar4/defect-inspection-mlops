@@ -18,8 +18,15 @@ venv/
 /data/feedback/
 /data/archive/
 /data/xsdd/
-/models/*
-!/models/versions.dvc
+# models/: each folder is ignored by name. A wildcard (/models/*/ or /models/*) makes DVC treat
+# models/ itself as ignored and skip models/versions.dvc (ADR-034); *.pt / *.onnx still apply.
+/models/archive/
+/models/baseline/
+/models/compare/
+/models/onnx/
+/models/serving/
+/models/smoke/
+/models/versions/
 *.pt
 *.pth
 *.onnx

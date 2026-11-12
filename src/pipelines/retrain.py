@@ -379,22 +379,20 @@ def step_calibrate(params: Mapping[str, Any], state: State) -> None:
 
 
 def step_challenger(params: Mapping[str, Any], state: State) -> None:
-    import mlflow
-
-    from src.tracking import mlflow_tracking as mt
+    from src.tracking import mlflow_tracking as mt  # the only MLflow entry point
 
     cfg = mt.TrackingConfig.from_params(params, smoke=False)
-    client = mlflow.MlflowClient(tracking_uri=mt.resolve_tracking_uri(cfg.local_uri))
     metrics = json.loads(
         (Path(state["results_dir"]) / "val_metrics.json").read_text(encoding="utf-8")
     )
-    tags = challenger_tags(metrics, state["temperature"], state["review_threshold"])
-    for key, value in tags.items():
-        client.set_model_version_tag(cfg.registered_model, state["version"], key, value)
+    mt.set_version_tags(
+        cfg,
+        state["version"],
+        challenger_tags(metrics, state["temperature"], state["review_threshold"]),
+    )
     alias = str(params["promotion"]["challenger_alias"])
-    before = client.get_registered_model(cfg.registered_model).aliases.get(alias)
-    client.set_registered_model_alias(cfg.registered_model, alias, state["version"])
-    state.finish("challenger", previous_challenger=None if before is None else str(before))
+    before = mt.move_alias(cfg, alias, state["version"])  # tags first, alias last
+    state.finish("challenger", previous_challenger=before)
 
 
 def step_versions(params: Mapping[str, Any], state: State) -> None:

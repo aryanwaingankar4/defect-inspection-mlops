@@ -393,5 +393,7 @@ def test_retrain_params_and_gitignore():
     r = PARAMS["retrain"]
     assert r["versions_dir"] == "models/versions" and r["min_feedback_rows"] >= 1
     ignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
-    assert "/models/*" in ignore and "!/models/versions.dvc" in ignore
+    assert "/models/versions/" in ignore  # weights: DVC, never git
+    # a wildcard makes DVC's matcher treat models/ as ignored and skip models/versions.dvc
+    assert not any(line.startswith("/models/*") for line in ignore)
     assert PARAMS["kaggle"]["feedback_dataset_slug"] != PARAMS["kaggle"]["dataset_slug"]

@@ -208,7 +208,8 @@ kaggle:                            # TASK-010: all full training runs on Kaggle 
   feedback_staging_dir: build/kaggle-feedback   # git-ignored
 
 retrain:                           # src/pipelines/retrain.py (TASK-028, ADR-034). Reviewer and stream are SIMULATED
-  min_feedback_rows: 50            # refuse to retrain on fewer labelled production_stream images (set from cycle 1)
+  min_feedback_rows: 50            # refuse to retrain on fewer labelled production_stream images. Cycle 1: a full
+                                   # stream pass yielded 67 rows (results/feedback/export_report.json); 50 = about 3/4 of a pass
   versions_dir: models/versions    # v<version>/best.pt per registered version; `dvc add models/versions`
   state_dir: build/retrain         # git-ignored: state.json (resume) + downloaded Kaggle output
   results_dir: results/retrain     # committed: <run_uid>/ (run results, calibration, threshold) + cycle_<run_uid>.json

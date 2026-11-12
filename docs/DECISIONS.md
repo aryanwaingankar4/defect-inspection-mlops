@@ -414,6 +414,12 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
   - Each cycle adds only about as many labels as its chunk routes (about 6% in the pilot). Val has 180 images, so differences between cycles are mostly within noise; the summary says so.
   - The fault-injection model is registered and kept like any version, but it can never be promoted.
   - Three Kaggle runs: cycle 2, cycle 3 and the fault run.
+- **Amendment (2026-11-12, after the fault run):** the fault-injection model (v6) never reached the gate. The challenger's review threshold (ADR-023) refused it, because the risk upper bound among accepted val images was above `threshold.max_risk_ucb`, so it never got the tags the gate needs. For a fault-injection run only, such a refusal is now **recorded as the run's outcome**:
+  - the retrain cycle record says `stopped before the gate` and gives the check and its message;
+  - the challenger, serving and gate steps are skipped; the checkpoint is still kept (`versions`);
+  - `@challenger` is never moved.
+  - The loop table shows this outcome as it is. The gate's own checks are not evaluated, and nothing is relaxed so that the gate could run.
+  - In a real cycle the same refusal still stops the flow for an owner decision.
 
 ## ADR-037 — Retrain calibration: inherit the champion's T when the val fit hits its bound
 - **Context:** **This rule was added after cycle 2 of TASK-030 exposed a gap.** ADR-006 says a temperature fit on a range bound writes nothing and stops. The cycle-2 challenger (v4) classified all 180 val images correctly. With no errors, mean NLL keeps falling as T → 0, so the fit always lands on `calibrate.t_min`. `make retrain` stopped at `calibrate`, and the challenger could never reach the gate. The gate (ADR-033) does not use T, but a promoted version must be servable, which needs T, the review threshold and the OOD threshold. So any challenger with a perfect val score, and more generally any challenger whose fit hits a bound, was locked out.

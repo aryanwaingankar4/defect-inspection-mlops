@@ -202,6 +202,8 @@ def registry(offline_mlflow, tmp_path):
             "checkpoint_sha256": _sha(ckpt),
             "temperature": "1.5",
             "review_threshold": "0.8",
+            "ood_energy_threshold": "-6.1",  # servable: promote is allowed (ADR-034)
+            "serving_precision": "fp32",
         }
         for k, v in tags.items():
             client.set_model_version_tag(name, version, k, v)
@@ -237,7 +239,7 @@ def test_resolve_refuses_missing_or_identical_aliases(registry):
         gt.resolve(registry["params"])
 
 
-def run_gate(registry, monkeypatch, challenger_pred, parity=PARITY_OK, apply=True):
+def run_gate(registry, monkeypatch, challenger_pred, parity=PARITY_OK, apply=True, record=False):
     """The full run with scoring and the ONNX export replaced by synthetic results."""
     preds = {registry["ckpt"]["1"]: CHAMPION, registry["ckpt"]["2"]: challenger_pred}
     paths = [f"x/{i}.jpg" for i in range(len(Y))]
@@ -253,7 +255,13 @@ def run_gate(registry, monkeypatch, challenger_pred, parity=PARITY_OK, apply=Tru
 
     monkeypatch.setattr(gt, "score", fake_score)
     monkeypatch.setattr(gt, "onnx_parity", fake_parity)
-    out = gt.run(registry["params"], registry["ckpt"]["2"], registry["ckpt"]["1"], do_apply=apply)
+    out = gt.run(
+        registry["params"],
+        registry["ckpt"]["2"],
+        registry["ckpt"]["1"],
+        do_apply=apply,
+        record_only=record,
+    )
     assert calls == [{"alias": "challenger", "ckpt": registry["ckpt"]["2"], "log_mlflow": apply}]
     return out
 
@@ -300,6 +308,36 @@ def test_dry_run_writes_nothing_and_changes_nothing(registry, monkeypatch):
     assert aliases(registry) == {"champion": "1", "challenger": "2"}
     assert not Path(registry["params"]["promotion"]["log_file"]).exists()
     assert not Path(registry["params"]["promotion"]["gate"]["out_dir"]).exists()
+
+
+def test_record_mode_writes_only_the_gate_file(registry, monkeypatch):
+    out = run_gate(registry, monkeypatch, Y.copy(), apply=False, record=True)
+    gate_file = Path(registry["params"]["promotion"]["gate"]["out_dir"]) / "gate_2.json"
+    assert out["gate_file"] == gate_file and "log_file" not in out
+    record = json.loads(gate_file.read_text(encoding="utf-8"))
+    assert record["decision"] == "promote" and record["applied"] is False
+    assert aliases(registry) == {"champion": "1", "challenger": "2"}  # nothing moved
+    assert "gate_decision" not in registry["client"].get_model_version(registry["name"], "2").tags
+    assert not Path(registry["params"]["promotion"]["log_file"]).exists()
+
+
+def test_promote_refuses_a_challenger_that_cannot_be_served(registry, monkeypatch):
+    registry["client"].delete_model_version_tag(registry["name"], "2", "ood_energy_threshold")
+    with pytest.raises(gt.GateError, match="not servable"):
+        run_gate(registry, monkeypatch, Y.copy())
+    assert aliases(registry) == {"champion": "1", "challenger": "2"}
+    assert not Path(registry["params"]["promotion"]["log_file"]).exists()
+
+
+def test_champion_checkpoint_defaults_to_the_kept_version(tmp_path):
+    params = copy.deepcopy(PARAMS)
+    params["retrain"]["versions_dir"] = str(tmp_path)
+    fallback = Path(params["compare_val"]["models"][0]["checkpoint"])
+    assert gt.default_champion_checkpoint(params, "2") == fallback
+    kept = tmp_path / "v2" / "best.pt"
+    kept.parent.mkdir()
+    kept.write_bytes(b"w")
+    assert gt.default_champion_checkpoint(params, "2") == kept
 
 
 def test_apply_refuses_if_an_alias_moved(registry):

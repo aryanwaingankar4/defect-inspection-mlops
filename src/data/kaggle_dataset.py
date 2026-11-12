@@ -10,6 +10,9 @@ check three things and fail loudly otherwise:
   3. the uploaded images are exactly the images listed in the split CSV.
 
 The NEU images have no licence to redistribute: this module has no way to upload publicly.
+
+``upload_feedback`` (retraining, ADR-034) puts one ``feedback.csv`` (paths and labels, no pixels)
+into a second PRIVATE dataset, as a new version per cycle, with the same privacy checks.
 """
 
 from __future__ import annotations
@@ -64,14 +67,14 @@ def find_own_dataset(api: Any, ref: str) -> Any | None:
     return None
 
 
-def upload(api: Any, staging_dir: Path, ref: str) -> str:
+def upload(api: Any, staging_dir: Path, ref: str, notes: str = "re-upload data/raw") -> str:
     """Create the dataset privately, or add a version if it already exists."""
     if find_own_dataset(api, ref) is None:
         resp = api.dataset_create_new(str(staging_dir), public=False, quiet=True, dir_mode="zip")
         action = "created"
     else:
         resp = api.dataset_create_version(
-            str(staging_dir), version_notes="re-upload data/raw", quiet=True, dir_mode="zip"
+            str(staging_dir), version_notes=notes, quiet=True, dir_mode="zip"
         )
         action = "new version"
     error = getattr(resp, "error", None)  # the API reports rejections here instead of raising
@@ -155,6 +158,46 @@ def verify_files(uploaded: Iterable[str], expected: Iterable[str]) -> None:
             f"uploaded images differ from the split CSV: {len(want - got)} missing "
             f"(e.g. {missing}), {len(got - want)} unexpected (e.g. {extra})"
         )
+
+
+FEEDBACK_FILE = "feedback.csv"
+
+
+def stage_feedback(csv_path: Path, staging_dir: Path, metadata: dict[str, Any]) -> Path:
+    """A fresh staging folder with only ``feedback.csv`` and the metadata file."""
+    if staging_dir.exists():
+        shutil.rmtree(staging_dir)
+    staging_dir.mkdir(parents=True)
+    shutil.copy2(csv_path, staging_dir / FEEDBACK_FILE)
+    (staging_dir / METADATA_FILE).write_text(json.dumps(metadata, indent=2) + "\n", "utf-8")
+    return staging_dir
+
+
+def upload_feedback(
+    api: Any,
+    params: dict[str, Any],
+    csv_path: Path,
+    md5: str,
+    *,
+    fetch: Fetch = http_status,
+    wait: Callable[[Any, str], None] = wait_until_ready,
+) -> str:
+    """Upload ``csv_path`` as a new version of the private feedback dataset and check that it is
+    private and holds exactly ``feedback.csv``. Returns the dataset ref (owner/slug)."""
+    k = params["kaggle"]
+    owner = api.get_config_value("username")
+    ref = f"{owner}/{k['feedback_dataset_slug']}"
+    meta = dataset_metadata(owner, k["feedback_dataset_slug"], k["feedback_dataset_title"])
+    staging = stage_feedback(Path(csv_path), Path(k["feedback_staging_dir"]), meta)
+    upload(api, staging, ref, notes=f"feedback export md5 {md5} (ADR-034)")
+    wait(api, ref)
+    verify_private(api, ref)
+    if anonymous_check(ref, fetch) != "blocked":
+        raise DatasetPrivacyError(f"could not confirm that anonymous users cannot see {ref}")
+    files = list_files(api, ref)
+    if files != [FEEDBACK_FILE]:
+        raise RuntimeError(f"{ref} should hold only {FEEDBACK_FILE}, holds {files}")
+    return ref
 
 
 def main(argv: list[str] | None = None) -> int:

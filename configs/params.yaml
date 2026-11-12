@@ -203,6 +203,17 @@ kaggle:                            # TASK-010: all full training runs on Kaggle 
   output_dir: build/kaggle-output     # downloaded run outputs (mirrors /kaggle/working)
   output_results: results/train       # inside output_dir: val_metrics.json, curves, params.yaml
   output_checkpoint: models/baseline/best.pt  # inside output_dir; `make register` publishes these (ADR-020)
+  feedback_dataset_slug: neu-feedback-private   # ADR-034: PRIVATE, one feedback.csv (paths + labels), a version per cycle
+  feedback_dataset_title: NEU feedback private
+  feedback_staging_dir: build/kaggle-feedback   # git-ignored
+
+retrain:                           # src/pipelines/retrain.py (TASK-028, ADR-034). Reviewer and stream are SIMULATED
+  min_feedback_rows: 50            # refuse to retrain on fewer labelled production_stream images (set from cycle 1)
+  versions_dir: models/versions    # v<version>/best.pt per registered version; `dvc add models/versions`
+  state_dir: build/retrain         # git-ignored: state.json (resume) + downloaded Kaggle output
+  results_dir: results/retrain     # committed: <run_uid>/ (run results, calibration, threshold) + cycle_<run_uid>.json
+  poll_seconds: 60                 # Kaggle status poll interval
+  timeout_minutes: 180             # stop waiting for Kaggle after this (a rerun resumes the wait)
 
 near_duplicates:
   hash_size: 8                     # pHash bits = hash_size^2 = 64

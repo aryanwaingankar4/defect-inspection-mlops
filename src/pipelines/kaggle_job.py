@@ -32,6 +32,7 @@ NOTEBOOK_FILE = "kaggle_train_launcher.ipynb"
 METADATA_FILE = "kernel-metadata.json"
 PLACEHOLDERS = ("COMMIT", "REPO_URL", "UV_VERSION", "NUM_WORKERS", "TRAIN_ARGS")
 SAFE_ARG = re.compile(r"(--)?[A-Za-z0-9][A-Za-z0-9_.\-]*")  # no spaces, quotes or backslashes
+MD5 = re.compile(r"[0-9a-f]{32}")
 
 Git = Callable[..., str]
 
@@ -95,19 +96,27 @@ def render_notebook(template: str, values: Mapping[str, str]) -> str:
     return json.dumps(nb, indent=1, ensure_ascii=False) + "\n"
 
 
-def train_args(model: str | None) -> list[str]:
+def train_args(model: str | None, feedback_md5: str | None = None) -> list[str]:
     """Extra ``src.training.train`` arguments for this run.
 
     They are rendered into a string literal in the notebook, so only plain tokens are allowed.
+    ``feedback_md5`` (retraining, ADR-034) makes the notebook pass the attached feedback.csv.
     """
-    if model is None:
-        return []
-    if not SAFE_ARG.fullmatch(model):
-        raise LaunchError(f"invalid model name {model!r}")
-    return ["--model", model]
+    args: list[str] = []
+    if model is not None:
+        if not SAFE_ARG.fullmatch(model):
+            raise LaunchError(f"invalid model name {model!r}")
+        args += ["--model", model]
+    if feedback_md5 is not None:
+        if not MD5.fullmatch(feedback_md5):
+            raise LaunchError(f"invalid feedback MD5 {feedback_md5!r}")
+        args += ["--feedback-md5", feedback_md5]
+    return args
 
 
-def kernel_metadata(owner: str, k: Mapping[str, Any]) -> dict[str, Any]:
+def kernel_metadata(
+    owner: str, k: Mapping[str, Any], extra_datasets: Sequence[str] = ()
+) -> dict[str, Any]:
     return {
         "id": f"{owner}/{k['kernel_slug']}",
         "title": k["kernel_title"],
@@ -119,7 +128,7 @@ def kernel_metadata(owner: str, k: Mapping[str, Any]) -> dict[str, Any]:
         "enable_tpu": False,
         "enable_internet": True,
         "machine_shape": k["accelerator"],
-        "dataset_sources": [f"{owner}/{k['dataset_slug']}"],
+        "dataset_sources": [f"{owner}/{k['dataset_slug']}", *extra_datasets],
         "competition_sources": [],
         "kernel_sources": [],
         "model_sources": [],
@@ -132,6 +141,7 @@ def build_kernel_dir(
     commit: str,
     out_dir: Path,
     extra_args: Sequence[str] = (),
+    extra_datasets: Sequence[str] = (),
 ) -> Path:
     k = params["kaggle"]
     template = (REPO_ROOT / k["notebook_template"]).read_text(encoding="utf-8")
@@ -148,7 +158,7 @@ def build_kernel_dir(
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
     (out_dir / NOTEBOOK_FILE).write_text(render_notebook(template, values), encoding="utf-8")
-    meta = json.dumps(kernel_metadata(owner, k), indent=2) + "\n"
+    meta = json.dumps(kernel_metadata(owner, k, extra_datasets), indent=2) + "\n"
     (out_dir / METADATA_FILE).write_text(meta, encoding="utf-8")
     return out_dir
 
@@ -159,6 +169,45 @@ def _api() -> Any:
     api = KaggleApi()
     api.authenticate()
     return api
+
+
+def push(
+    api: Any,
+    params: Mapping[str, Any],
+    commit: str,
+    extra_args: Sequence[str] = (),
+    extra_datasets: Sequence[str] = (),
+    *,
+    no_run: bool = False,
+) -> str:
+    """Render the launcher pinned to ``commit`` and push it (starts the run). Returns the URL."""
+    k = params["kaggle"]
+    owner = api.get_config_value("username")
+    folder = build_kernel_dir(
+        params, owner, commit, Path(k["kernel_dir"]), extra_args, extra_datasets
+    )
+    resp = api.kernels_push(str(folder), acc=k["accelerator"], no_run=no_run)
+    error = getattr(resp, "error", None)
+    if error:
+        raise LaunchError(f"push failed: {error}")
+    return str(getattr(resp, "url", ""))
+
+
+def kernel_ref(api: Any, params: Mapping[str, Any]) -> str:
+    return f"{api.get_config_value('username')}/{params['kaggle']['kernel_slug']}"
+
+
+def status(api: Any, params: Mapping[str, Any]) -> str:
+    """The latest run's status as a lower-case word (e.g. running, complete, error)."""
+    raw = api.kernels_status(kernel_ref(api, params))
+    value = getattr(raw, "status", raw)
+    return str(getattr(value, "name", value)).split(".")[-1].lower()
+
+
+def download_output(api: Any, params: Mapping[str, Any], out: Path) -> int:
+    out.mkdir(parents=True, exist_ok=True)
+    files, _ = api.kernels_output(kernel_ref(api, params), str(out), force=True)
+    return len(files)
 
 
 def main(argv: list[str] | None = None) -> int:

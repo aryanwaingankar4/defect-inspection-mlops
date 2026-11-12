@@ -18,7 +18,8 @@ venv/
 /data/feedback/
 /data/archive/
 /data/xsdd/
-/models/
+/models/*
+!/models/versions.dvc
 *.pt
 *.pth
 *.onnx

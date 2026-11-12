@@ -47,7 +47,10 @@ class SplitDataset(Dataset):
         augment_cfg: AugmentConfig | None = None,
         allow_test: bool = False,
         images_per_class: int | None = None,
+        extra_rows: Sequence[tuple[str, str]] = (),
     ) -> None:
+        """``extra_rows``: (path, class) pairs added after the split rows (checked feedback,
+        ADR-034); never cut by ``images_per_class``."""
         if PROTECTED_SPLIT in splits and not allow_test:
             raise TestSetAccessError(
                 f"'{PROTECTED_SPLIT}' is reserved for the promotion gate and final evaluation; "
@@ -59,11 +62,12 @@ class SplitDataset(Dataset):
         self.class_to_idx = {c: i for i, c in enumerate(classes)}
         wanted = set(splits)
         rows = [(p, c) for p, c, s in read_split_csv(Path(split_csv)) if s in wanted]
+        if images_per_class is not None:
+            rows = _first_n_per_class(rows, images_per_class)
+        rows = rows + [(p, c) for p, c in extra_rows]
         unknown = sorted({c for _, c in rows} - set(self.class_to_idx))
         if unknown:
             raise ValueError(f"classes {unknown} are not in the model's class list")
-        if images_per_class is not None:
-            rows = _first_n_per_class(rows, images_per_class)
         if not rows:
             raise ValueError(f"no images for splits {sorted(wanted)} in {split_csv}")
         self.paths = [p for p, _ in rows]

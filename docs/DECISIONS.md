@@ -440,3 +440,38 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
   - The review threshold still routes the least confident 5% of val (ADR-023), so routing stays bounded even if T is off.
   - A chain of inherited Ts is possible if several champions in a row inherit; each version's tags and `calibration.json` show where its T came from.
   - v4 resumes from `calibrate` under this rule. Nothing is retrained.
+
+## ADR-038 — Alembic migrations; the API checks the schema revision but never migrates; Postgres tested locally and in CI
+- **Context:** TASK-037. The prediction log (ADR-014, ADR-029) has so far been created with `create_all`, and one later column (`reason_audit`, ADR-030) was added by ad-hoc "additive only" code in `src/db/store.py`. Azure will use PostgreSQL (ADR-003/012). Schema changes need real, ordered, reviewable migrations, and an app must never change a shared database's schema on its own.
+- **Decision (owner decisions of 2026-11-12, written and committed before the code):**
+  - **Alembic** owns the schema. The migrations live in `src/db/migrations/` and are configured from code (no `alembic.ini`). The **baseline revision** is today's schema: `predictions` (including `reason_audit`) and `feedback`, written out by hand in the revision. It does not import the models, so it stays frozen. A test checks that a database at head matches the models exactly (Alembic's autogenerate comparison finds no difference), so a model change without a migration fails the tests.
+  - `PredictionLog.create_tables` / `upgrade_schema` (the additive-schema code of ADR-030) are **removed**.
+  - **Who migrates:** only `make db-migrate` (`python -m src.db.migrate upgrade`: `alembic upgrade head` on `DATABASE_URL`) and `make db-reset` (a fresh local database, created at head).
+    - In docker compose, a one-shot `migrate` service (same image, same `DATABASE_URL`) runs to completion before the API starts.
+  - **The API never migrates.** At startup it reads the database's revision and **refuses to start** unless it is at head. The error says which revision it found, which one it expected, and to run `make db-migrate`.
+    - The review UI, the simulated reviewer and the feedback export apply the same check.
+  - **Existing pre-Alembic databases** (`data/predictions.db`, `data/archive/*.db`):
+    - `db-migrate` finds no `alembic_version` table but finds the app tables. It compares their schema with a fresh baseline database: tables, columns, nullability, types, indexes, unique constraints and foreign keys.
+    - Only if they are identical does it **stamp** the baseline, then upgrade to head. Otherwise it refuses and changes nothing.
+    - A non-SQLite database with app tables but no revision is always refused; there are no such databases.
+  - **Driver:** a `postgresql://` URL (the form Azure gives) is read as `postgresql+psycopg://`.
+  - **Dependencies (owner-approved, serve group, each released at least two weeks before 2026-11-12):**
+    - `alembic==1.20.1` (2026-10-22; already in the lock through mlflow);
+    - `psycopg[binary]==3.3.6` (2026-09-18).
+  - **Local Postgres:** a compose profile `postgres` with `postgres:16.14` (2026-08-05), pinned by digest.
+    - Bound to `127.0.0.1:${POSTGRES_PORT:-5433}`.
+    - User and database `defect`, with a **fixed, non-secret password used only for local tests** (`defect-local-test`). It is never used for any deployed database.
+    - The compose API reads `API_DATABASE_URL`, which defaults to its SQLite volume.
+  - **DB tests on Postgres:** `TEST_DATABASE_URL` points the DB and migration tests at Postgres; without it they use a temporary SQLite file. These tests drop and recreate the schema, so they refuse any host other than `localhost` / `127.0.0.1`.
+  - **Smoke:** `make docker-smoke` keeps using SQLite and writes `results/docker/image_report.json`, including the new image size. `make docker-smoke-postgres` runs the same API checks with the API on the compose Postgres and writes `results/docker/image_report_postgres.json`.
+  - **CI:** a new job runs the same pinned Postgres image as a service container, then `make db-migrate` and the DB/migration tests against it.
+- **Reason:**
+  - Migrations make every schema change explicit, ordered and reviewable.
+  - Refusing to start on the wrong revision turns a silent mismatch into a clear deploy-time error.
+  - Keeping migration out of the app means several replicas or apps (API, review UI) never race to change a shared schema.
+  - Stamping only an identical legacy schema keeps old local logs usable without guessing.
+- **Consequences:**
+  - Every schema change from now on needs an Alembic revision.
+  - After pulling this change, existing local logs need `make db-migrate` once.
+  - Azure will need a migration step before each deploy (a Container Apps job; TASK-039/041).
+  - The API image grows by Alembic and psycopg; the size is recorded in `results/docker/image_report.json`.

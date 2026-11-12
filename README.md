@@ -91,6 +91,14 @@ The Docker stack (`make docker-up`) keeps its own log in the Docker volume `pred
 
 `make retrain` runs one loop cycle (ADR-034). It uploads the feedback export to a private Kaggle dataset, trains on Kaggle's GPU from the ImageNet weights on `train_v1` + feedback, registers the result as `@challenger`, and runs the promotion gate in record mode. It resumes if interrupted, and it never moves `@champion`. Each cycle writes `results/retrain/cycle_<run_uid>.json` and `results/promotion/gate_<version>.json`.
 
+### Loop cycles (simulated, ADR-036)
+
+[`results/loop/README.md`](results/loop/README.md) has one row per cycle: labels, reviewer error, val macro-F1 of champion vs challenger, verdict and gate file. It also has the report-only `test_frozen` comparison of the original v2 with the final champion. The table is generated from `results/loop/loop_summary.json` by `make loop-summary`.
+
+- **Cycle 1 (pilot):** every `production_stream` image went through v2, and the images it routed were labelled.
+- **Cycles 2 and 3:** each streams a disjoint chunk of the images the pilot did not label (`data/splits/loop_chunks.csv`, `make stream ARGS="--chunk cycleN"`). These are **not brand-new traffic**: v2 already predicted them in the pilot, but none of them was labelled or trained on. Cycle 3's simulated reviewer gives a wrong label 5% of the time.
+- **Fault-injection run (labelled as such):** a broken reviewer moves every label to the next class. It works on a copy (`make fault-export`) that never enters the feedback history. The model is tagged `fault_injection=true`, and the gate runs in record mode only; `gate --apply` refuses such a version.
+
 ## Documentation
 
 | File | Purpose |

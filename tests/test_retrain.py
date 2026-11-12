@@ -348,7 +348,16 @@ def test_run_executes_steps_in_order_and_resumes(tmp_path, monkeypatch):
         rt, "step_record", lambda params, state: state.finish("record", cycle_file="c")
     )
     rt.run(p, api_factory=lambda: "api")
-    assert calls == ["wait", "download", "register", "calibrate", "challenger", "versions", "gate"]
+    assert calls == [
+        "wait",
+        "download",
+        "register",
+        "calibrate",
+        "challenger",
+        "serving",
+        "versions",
+        "gate",
+    ]
     with pytest.raises(rt.RetrainError, match="finished"):
         rt.run(p, api_factory=lambda: "api")
     calls.clear()
@@ -397,3 +406,76 @@ def test_retrain_params_and_gitignore():
     # a wildcard makes DVC's matcher treat models/ as ignored and skip models/versions.dvc
     assert not any(line.startswith("/models/*") for line in ignore)
     assert PARAMS["kaggle"]["feedback_dataset_slug"] != PARAMS["kaggle"]["dataset_slug"]
+
+
+# ---------------------------------------------------------------- ADR-035: serving readiness
+
+
+def test_serving_step_runs_after_challenger_and_before_the_gate():
+    steps = list(rt.STEPS)
+    assert steps.index("challenger") < steps.index("serving") < steps.index("gate")
+
+
+def test_prepare_serving_refuses_another_checkpoint(tmp_path):
+    ckpt = tmp_path / "best.pt"
+    ckpt.write_bytes(b"w")
+    version = {"version": "3", "alias": "challenger", "tags": {"checkpoint_sha256": "0" * 64}}
+    with pytest.raises(rt.RetrainError, match="not the checkpoint"):
+        rt.prepare_serving(PARAMS, version, ckpt, tmp_path)
+
+
+def test_prepare_serving_exports_tags_fp32_then_sets_the_ood_threshold(tmp_path, monkeypatch):
+    pytest.importorskip("torch")
+    from src.tracking import mlflow_tracking as mt
+    from src.training import export_onnx as ex
+    from src.training import ood
+
+    ckpt = tmp_path / "best.pt"
+    ckpt.write_bytes(b"w")
+    sha = hashlib.sha256(b"w").hexdigest()
+    version = {
+        "version": "3",
+        "alias": "challenger",
+        "tags": {"checkpoint_sha256": sha, "model": "m"},
+    }
+    calls = []
+
+    def fake_export(p, *, alias, checkpoint, report_file, log_mlflow):
+        main = p["compare_val"]["models"][0]
+        calls.append(("export", alias, main["checkpoint"], main["results_dir"], log_mlflow))
+        return {
+            "onnx": tmp_path / "m.onnx",
+            "report": {"onnx_sha256": "b" * 64, "parity": {"passed": True}},
+        }
+
+    def fake_tags(cfg, v, tags):
+        calls.append(("tags", v, dict(tags)))
+
+    def fake_ood(p, *, alias, onnx_path, log_mlflow):
+        calls.append(("ood", alias, onnx_path, p["train"]["model"], log_mlflow))
+        return {"result": {"ood_energy_threshold": -6.0}, "out": tmp_path / "ood.json"}
+
+    monkeypatch.setattr(ex, "run", fake_export)
+    monkeypatch.setattr(mt, "set_version_tags", fake_tags)
+    monkeypatch.setattr(ood, "run", fake_ood)
+    out = rt.prepare_serving(PARAMS, version, ckpt, tmp_path)
+    assert calls == [
+        ("export", "challenger", str(ckpt), str(tmp_path), True),
+        ("tags", "3", {"serving_precision": "fp32"}),
+        ("ood", "challenger", tmp_path / "m.onnx", "m", True),
+    ]
+    assert out["ood_energy_threshold"] == -6.0 and out["parity_passed"] is True
+
+
+def test_ood_needs_the_tagged_onnx_file_for_a_challenger(tmp_path):
+    pytest.importorskip("torch")
+    from src.training import ood
+
+    f = tmp_path / "m.onnx"
+    f.write_bytes(b"onnx")
+    version = {"alias": "challenger", "tags": {"onnx_sha256": hashlib.sha256(b"onnx").hexdigest()}}
+    assert ood.tagged_fp32_onnx(version, f) == (f, "fp32")
+    with pytest.raises(ood.OodError, match="not the fp32 file"):
+        ood.tagged_fp32_onnx({**version, "tags": {"onnx_sha256": "0" * 64}}, f)
+    with pytest.raises(ood.OodError, match="needs its ONNX file"):
+        ood.run(PARAMS, alias="challenger")

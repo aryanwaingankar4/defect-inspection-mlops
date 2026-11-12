@@ -232,7 +232,9 @@ def test_champion_refuses_missing_tags(registry):
 def test_committed_export_report_is_consistent():
     r = json.loads((REPO_ROOT / CFG.report_file).read_text(encoding="utf-8"))
     log = json.loads((REPO_ROOT / PARAMS["promotion"]["log_file"]).read_text(encoding="utf-8"))
-    champ = [e for e in log if e["alias"] == PARAMS["promotion"]["champion_alias"]][-1]
+    # results/onnx/ is the first champion's export (ADR-024/025); later champions keep theirs in
+    # results/retrain/<run_uid>/onnx_export.json (ADR-035)
+    champ = next(e for e in log if e["decision"] == "initial_champion")
     assert r["decision_record"] == "ADR-025"
     assert (r["version"], r["run_id"]) == (champ["version"], champ["run_id"])
     assert r["checkpoint_sha256"] == champ["checkpoint_sha256"]

@@ -1,0 +1,26 @@
+{
+  "decision_record": "ADR-035",
+  "action": "rollback",
+  "time_utc": "2026-11-12T01:13:13+00:00",
+  "registered_model": "steel-defect-classifier",
+  "alias": "champion",
+  "from_version": "3",
+  "to_version": "2",
+  "reason": "previous_champion_version tag on v3",
+  "checks": {
+    "checkpoint": "models/versions/v2/best.pt",
+    "serving_precision": "fp32",
+    "onnx_tags": {
+      "onnx_sha256": "d49370a4d8e5161ef5aa50660db431734750e1815a1eb3a3972da2923400cb1f",
+      "onnx_artifact": "onnx/steel-defect-classifier-v2.fp32.onnx"
+    },
+    "values": {
+      "temperature": "1.6424862981226587",
+      "review_threshold": "0.8160653375842147",
+      "ood_energy_threshold": "-6.1445646940236704"
+    },
+    "problems": []
+  },
+  "next_step": "make serving-bundle && make docker-smoke  (then deploy the new image)",
+  "note": "rollback moves the alias only; the serving bundle and image are rebuilt next"
+}

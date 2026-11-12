@@ -166,7 +166,9 @@ def test_champion_on_real_neu_val_images(image_id):
 @pytest.mark.needs_data
 def test_golden_val_images_follow_the_rule_and_are_never_test_frozen(monkeypatch):
     monkeypatch.chdir(REPO_ROOT)
-    chosen = {v["id"]: v["path"] for v in gd.val_images(PARAMS)}
+    # the val images are picked from the champion's own val_predictions.csv (ADR-035)
+    params = gd.with_predictions(PARAMS, Path(EXPECTED["champion"]["val_predictions"]))
+    chosen = {v["id"]: v["path"] for v in gd.val_images(params)}
     assert chosen == {e["id"]: e["source"] for e in EXPECTED["champion"]["images"][1:]}
     with (REPO_ROOT / PARAMS["data"]["split_file"]).open(encoding="utf-8", newline="") as f:
         split_of = {r["path"]: r["split"] for r in csv.DictReader(f)}
@@ -177,3 +179,22 @@ def test_golden_refuses_test_frozen():
     params = {**PARAMS, "train": {**PARAMS["train"], "val_split": "test_frozen"}}
     with pytest.raises(gd.GoldenError, match="test_frozen"):
         gd.val_images(params)
+
+
+def test_golden_predictions_must_belong_to_the_bundle_checkpoint(tmp_path):
+    """ADR-035: after a promotion, golden reads the new champion's val_predictions.csv."""
+    import copy as _copy
+
+    from src.serving import golden as gd
+
+    folder = tmp_path / "results"
+    folder.mkdir()
+    (folder / "val_predictions.csv").write_text("path,pred\n", encoding="utf-8")
+    (folder / "calibration.json").write_text('{"checkpoint_sha256": "abc"}', encoding="utf-8")
+    params = gd.with_predictions(_copy.deepcopy(PARAMS), folder / "val_predictions.csv")
+    assert params["compare_val"]["models"][0]["results_dir"] == str(folder)
+    gd.check_predictions_belong_to(params, {"checkpoint_sha256": "abc", "version": "3"})
+    with pytest.raises(gd.GoldenError, match="another checkpoint"):
+        gd.check_predictions_belong_to(params, {"checkpoint_sha256": "def", "version": "3"})
+    with pytest.raises(gd.GoldenError, match="val_predictions.csv"):
+        gd.with_predictions(PARAMS, folder / "other.csv")

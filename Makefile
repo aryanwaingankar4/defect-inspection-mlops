@@ -24,7 +24,7 @@ MANIFEST := models/serving/manifest.json
 SMOKE_AUDIT_SALT := smoke-test-audit-salt-not-secret
 
 .PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
-	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke monitoring-smoke review-ui stream simulate-review db-reset feedback-export gate retrain register kaggle-dataset kaggle-push kaggle-status kaggle-output
+	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke monitoring-smoke review-ui stream simulate-review db-reset feedback-export gate retrain challenger-serving rollback challenger register kaggle-dataset kaggle-push kaggle-status kaggle-output
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -155,8 +155,8 @@ feedback-export: ## production_stream labels -> data/feedback/feedback.csv (DVC)
 	@echo "New feedback version. Commit it and back it up:"
 	@echo "  git add data/feedback.dvc results/feedback/export_report.json && make push"
 
-golden: ## Golden images + expected @champion outputs -> tests/golden/ (needs bundle + NEU val; ADR-017)
-	$(RUN_SERVE) python -m src.serving.golden --config $(PARAMS)
+golden: ## Golden images + expected @champion outputs -> tests/golden/ (needs bundle + NEU val; ADR-017). ARGS: --val-predictions CSV
+	$(RUN_SERVE) python -m src.serving.golden --config $(PARAMS) $(ARGS)
 
 openapi-snapshot: ## Rewrite the API contract tests/contract/openapi.json (only for an intended API change)
 	$(RUN_SERVE) python -m src.serving.contract --config $(PARAMS)
@@ -169,6 +169,16 @@ gate: ## Non-inferiority gate @challenger vs @champion on val (ADR-033). ARGS: -
 
 retrain: ## SIMULATED-loop cycle: feedback -> Kaggle GPU -> @challenger -> gate record (resumes; ARGS=--fresh; ADR-034)
 	$(RUN_TRAIN) --group serve $(ENV_FILE) python -m src.pipelines.retrain --config $(PARAMS) $(ARGS)
+
+challenger-serving: ## Make @challenger servable: FP32 ONNX + parity, serving_precision, OOD threshold on val (ADR-035)
+	$(RUN_TRAIN) $(ENV_FILE) python -m src.pipelines.challenger_serving --config $(PARAMS)
+
+rollback: ## Move @champion back to its previous version (or VERSION=v) if servable; writes results/promotion/ (ADR-035)
+	$(RUN_TRAIN) $(ENV_FILE) python -m src.tracking.rollback --config $(PARAMS) $(if $(VERSION),--version $(VERSION),)
+
+challenger: ## Point @challenger at VERSION=v (servable, not the champion) to re-run the gate (ADR-035)
+	@test -n "$(VERSION)" || { echo "usage: make challenger VERSION=v"; exit 1; }
+	$(RUN_TRAIN) $(ENV_FILE) python -m src.tracking.rollback --config $(PARAMS) --set-challenger $(VERSION)
 
 register: ## Publish the downloaded Kaggle run to MLflow. ARGS: --register, --role comparison, --results-dir DIR (ADR-020)
 	$(RUN_TRAIN) $(ENV_FILE) python -m src.tracking.publish --config $(PARAMS) $(ARGS)

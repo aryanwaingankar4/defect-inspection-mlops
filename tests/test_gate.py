@@ -356,3 +356,36 @@ def test_export_resolves_any_alias(registry):
     assert ex.checkpoint_at(v, registry["ckpt"]["2"]).name == "efficientnet_b0"
     with pytest.raises(ex.ExportError, match="needs its checkpoint"):
         ex.run(registry["params"], alias="challenger")
+
+
+# ---------------------------------------------------------------- ADR-035 additions
+
+
+def test_gate_files_are_never_overwritten(registry, monkeypatch):
+    run_gate(registry, monkeypatch, Y.copy(), apply=False, record=True)
+    out_dir = Path(registry["params"]["promotion"]["gate"]["out_dir"])
+    assert (out_dir / "gate_2.json").exists()
+    out = run_gate(registry, monkeypatch, Y.copy(), apply=False, record=True)
+    assert out["gate_file"] == out_dir / "gate_2.2.json"
+    assert gt.next_free(out_dir, "gate_2") == out_dir / "gate_2.3.json"
+
+
+def test_apply_does_not_log_a_second_onnx_file(registry, monkeypatch):
+    registry["client"].set_model_version_tag(registry["name"], "2", "onnx_sha256", "a" * 64)
+    preds = {registry["ckpt"]["1"]: CHAMPION, registry["ckpt"]["2"]: Y.copy()}
+    paths = [f"x/{i}.jpg" for i in range(len(Y))]
+    monkeypatch.setattr(
+        gt,
+        "score",
+        lambda c, p, cfg: {"y": Y, "pred": preds[c], "classes": CLASSES, "paths": paths},
+    )
+    calls = []
+
+    def fake_parity(params, alias, ckpt, report, *, log_mlflow):
+        calls.append(log_mlflow)
+        return PARITY_OK
+
+    monkeypatch.setattr(gt, "onnx_parity", fake_parity)
+    out = gt.run(registry["params"], registry["ckpt"]["2"], registry["ckpt"]["1"], do_apply=True)
+    assert calls == [False] and out["record"]["decision"] == "promote"
+    assert aliases(registry) == {"champion": "2"}

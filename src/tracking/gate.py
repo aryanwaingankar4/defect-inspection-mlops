@@ -385,6 +385,16 @@ def log_entry(
 # ---------------------------------------------------------------- run
 
 
+def next_free(folder: Path, stem: str, suffix: str = ".json") -> Path:
+    """``<stem>.json``, else ``<stem>.2.json``, ``<stem>.3.json``...: decision files are never
+    overwritten (ADR-035)."""
+    path, k = folder / f"{stem}{suffix}", 1
+    while path.exists():
+        k += 1
+        path = folder / f"{stem}.{k}{suffix}"
+    return path
+
+
 def version_checkpoint(params: Mapping[str, Any], version: str) -> Path:
     """Where a registered version's checkpoint is kept (DVC-tracked, ADR-034)."""
     return Path(params["retrain"]["versions_dir"]) / f"v{version}" / "best.pt"
@@ -434,10 +444,11 @@ def run(
     alias = str(params["promotion"]["challenger_alias"])
     export_params = copy.deepcopy(dict(params))
     export_params["train"] = {**params["train"], "val_split": cfg.split}
-    if do_apply:
-        report = cfg.out_dir / f"onnx_parity_{chall['version']}.json"
+    if do_apply and not chall["tags"].get("onnx_sha256"):
+        report = next_free(cfg.out_dir, f"onnx_parity_{chall['version']}")
         parity = onnx_parity(export_params, alias, chall_ckpt, report, log_mlflow=True)
-    else:  # dry run: the ONNX file and its report go to a temporary folder
+    else:  # dry run, or the readiness step (ADR-035) already logged the ONNX file: check
+        # parity again in a temporary folder and log nothing
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             export_params["export"] = {**params["export"], "out_dir": tmp}
             parity = onnx_parity(
@@ -475,7 +486,7 @@ def run(
         "applied": do_apply,
     }
     out: dict[str, Any] = {"record": record}
-    gate_file = cfg.out_dir / f"gate_{chall['version']}.json"
+    gate_file = next_free(cfg.out_dir, f"gate_{chall['version']}")
     if not do_apply:
         if record_only:
             write_json(gate_file, record)

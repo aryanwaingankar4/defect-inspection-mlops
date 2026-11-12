@@ -29,5 +29,69 @@
       }
     },
     "results_commit": "ab2e7b15c9462009ebaba6c5e7a8552068d1c625"
+  },
+  {
+    "time_utc": "2026-11-12T01:12:52+00:00",
+    "decision": "promote",
+    "decision_record": "ADR-033",
+    "registered_model": "steel-defect-classifier",
+    "alias": "champion",
+    "version": "3",
+    "previous_version": "2",
+    "challenger_version": "3",
+    "challenger_run_id": "daf291704d514d378229e46d91c30563",
+    "gate": "non-inferiority on val (ADR-033)",
+    "checks": {
+      "macro_f1": true,
+      "class_recall": true,
+      "mcnemar": true,
+      "onnx_parity": true
+    },
+    "reasons": {
+      "macro_f1": "macro-F1 drop -0.0165 within 0.01",
+      "class_recall": "largest recall drop +0.0333 (crazing) within 0.05",
+      "mcnemar": "not significantly worse: p = 0.375, 1 champion-only vs 4 challenger-only correct",
+      "onnx_parity": "parity passed: max tolerance ratio 0.476 (<= 1 passes), same class 180/180, same routing 180/180, batch sizes ok"
+    },
+    "gate_file": "results/promotion/gate_3.2.json",
+    "gate_file_sha256": "39d084519cf4c890bce617e234ac7af5b33bd927acdffbe08abc862982e165fc"
+  },
+  {
+    "time_utc": "2026-11-12T01:13:13+00:00",
+    "decision": "rollback",
+    "decision_record": "ADR-035",
+    "registered_model": "steel-defect-classifier",
+    "alias": "champion",
+    "version": "2",
+    "previous_version": "3",
+    "reason": "previous_champion_version tag on v3",
+    "rollback_file": "results/promotion/rollback_20261112T011313Z.json",
+    "rollback_file_sha256": "f0d10943ecf158ceb3f16d3e0803d692b73a74b9a08fdc291ffbf1268624339d"
+  },
+  {
+    "time_utc": "2026-11-12T01:14:31+00:00",
+    "decision": "promote",
+    "decision_record": "ADR-033",
+    "registered_model": "steel-defect-classifier",
+    "alias": "champion",
+    "version": "3",
+    "previous_version": "2",
+    "challenger_version": "3",
+    "challenger_run_id": "daf291704d514d378229e46d91c30563",
+    "gate": "non-inferiority on val (ADR-033)",
+    "checks": {
+      "macro_f1": true,
+      "class_recall": true,
+      "mcnemar": true,
+      "onnx_parity": true
+    },
+    "reasons": {
+      "macro_f1": "macro-F1 drop -0.0165 within 0.01",
+      "class_recall": "largest recall drop +0.0333 (crazing) within 0.05",
+      "mcnemar": "not significantly worse: p = 0.375, 1 champion-only vs 4 challenger-only correct",
+      "onnx_parity": "parity passed: max tolerance ratio 0.476 (<= 1 passes), same class 180/180, same routing 180/180, batch sizes ok"
+    },
+    "gate_file": "results/promotion/gate_3.3.json",
+    "gate_file_sha256": "48fe6b8642a839f9e2c4bf2aea7cd4943452699c1eb8906d88837bacfd45b2c8"
   }
 ]

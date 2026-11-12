@@ -572,7 +572,7 @@ def create_app(
         return FeedbackResponse(
             request_id=body.request_id,
             stored=False,
-            detail="stub: feedback is validated but not stored until TASK-026",
+            detail="not stored by the API: labels are written via the review UI / src/db (ADR-032)",
         )
 
     return app

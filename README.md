@@ -54,6 +54,10 @@ push to main → GitHub Actions: CI → build image → GitHub Container Registr
 
 PyTorch + timm (EfficientNet-B0) · MLflow (aliases) · DVC · Prefect · ONNX Runtime (static INT8) · FastAPI · Streamlit · SQLite / PostgreSQL · Prometheus + Grafana · Azure Monitor · Evidently · Docker · GitHub Actions · GitHub Container Registry · Azure Container Apps
 
+## Promotion gate (non-inferiority)
+
+A retrained model (`@challenger`) replaces the serving model (`@champion`) only if it is **not worse**: on the `val` split, macro-F1 may drop by at most 0.01, no class recall may drop by more than 0.05, an exact McNemar test must not show it significantly worse, and its ONNX export must match PyTorch. The gate does **not** require a significant improvement. With 180 val images and a champion that makes few errors, no challenger could ever show one. `test_frozen` is never used by the loop; it stays for final, report-only results. Thresholds are in `configs/params.yaml`; every decision is written to `results/promotion/` and `results/promotion_log.json` (ADR-033).
+
 ## Data
 
 - **NEU-CLS**: 6 hot-rolled steel defect classes, 1,800 grayscale 200×200 images. This is the main dataset.

@@ -143,11 +143,18 @@ quantize:                          # src/training/quantize.py (TASK-016, ADR-002
     batch_sizes: [1, 32]
   report_file: results/onnx/quantization_report.json
 
-promotion:                         # src/tracking/promote.py (TASK-014, ADR-024); gate rules come with ADR-005
+promotion:                         # src/tracking/promote.py (TASK-014, ADR-024); gate: src/tracking/gate.py (ADR-033)
   champion_alias: champion         # serves predictions (ADR-001)
   challenger_alias: challenger     # candidate under the promotion gate (Phase 3)
   log_file: results/promotion_log.json   # every applied decision, appended
   code_url: https://github.com/aryanwaingankar4/defect-inspection-mlops  # evidence links in the registry
+  gate:                            # TASK-027, ADR-033: NON-INFERIORITY of @challenger vs @champion; all must pass
+    split: val                     # never test_frozen, never feedback rows (both refused)
+    max_macro_f1_drop: 0.01        # a) challenger macro-F1 >= champion macro-F1 - this
+    max_class_recall_drop: 0.05    # b) per class; val has 30 per class, so one image = 1/30 of recall
+    mcnemar_alpha: 0.05            # c) block if exact McNemar p < alpha AND the challenger is the worse one
+    batch_size: 32                 # CPU inference only
+    out_dir: results/promotion     # gate_<challenger version>.json (+ the challenger's ONNX parity report)
 
 serving:                           # src/serving/app.py (TASK-018, ADR-028); no registry access at runtime
   bundle_dir: models/serving       # git-ignored: <model>-v<version>.<precision>.onnx + manifest.json (`make serving-bundle`)

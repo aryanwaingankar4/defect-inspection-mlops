@@ -280,6 +280,7 @@ def test_feedback_stub_validates_and_stores_nothing(client):
     h = {"X-API-Key": KEY}
     r = client.post("/feedback", json={"request_id": "a" * 32, "label": "scratches"}, headers=h)
     assert r.status_code == 202 and r.json()["stored"] is False
+    assert "review UI" in r.json()["detail"] and "TASK-026" not in r.json()["detail"]
     bad = client.post("/feedback", json={"request_id": "a" * 32, "label": "cat"}, headers=h)
     assert_error(bad, 422, "unknown_label")
     bad = client.post("/feedback", json={"request_id": "nope", "label": "scratches"}, headers=h)

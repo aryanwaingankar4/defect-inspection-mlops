@@ -1,0 +1,46 @@
+{
+  "decision_record": "ADR-034",
+  "fault_injection": true,
+  "note": "FAULT INJECTION (ADR-036): trained on a BROKEN simulated reviewer's labels (every label shifted to the next class); never promoted. SIMULATED stream and SIMULATED reviewer (ADR-031); real Kaggle GPU training",
+  "commit": "b2a49f8c7b0c5d6f9d8c3280a6000412748f6625",
+  "feedback": {
+    "md5": "676229c85549da0e78ef41f47d489ed0",
+    "rows": 121
+  },
+  "feedback_per_class": {
+    "crazing": 20,
+    "inclusion": 21,
+    "patches": 40,
+    "pitted_surface": 16,
+    "rolled-in_scale": 17,
+    "scratches": 7
+  },
+  "kaggle": {
+    "pushed_at": "2026-11-12T11:34:04+00:00",
+    "completed_seen_at": "2026-11-12T11:37:07+00:00",
+    "wall_time_s": 183,
+    "training_time_s": 26,
+    "device": "cuda"
+  },
+  "run_uid": "a86807ab505243fab23168a780b756da",
+  "n_train": 271,
+  "champion_version": "5",
+  "challenger_version": "6",
+  "challenger_val_macro_f1_at_training": 0.7427780631170462,
+  "calibration": {
+    "source": "fitted",
+    "temperature": 1.9900664741253182,
+    "fitted_temperature": 1.9900664741253182,
+    "decision_record": "ADR-006"
+  },
+  "gate": {
+    "mode": "not reached: refused before the gate; the gate's checks were not evaluated",
+    "decision": "stopped_before_gate",
+    "failed_checks": [
+      "review_threshold_risk (ADR-023)"
+    ],
+    "stopped_at": "calibrate",
+    "reason": "risk upper bound 0.2934 among accepted val images is above max_risk_ucb 0.05; nothing written: the project owner decides (ADR-023)",
+    "file": null
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "decision_record": "ADR-036",
+  "cycle": "fault",
+  "fault_injection": true,
+  "note": "FAULT INJECTION: BROKEN reviewer, never promoted. SIMULATED stream and SIMULATED reviewer (ADR-031); real Kaggle GPU training",
+  "chunk": null,
+  "stream": null,
+  "review": null,
+  "reviewer_error": {
+    "kind": "broken",
+    "rule": "shift_to_next_class",
+    "labels_changed": 121
+  },
+  "new_labels": 0,
+  "feedback_rows_used": 121,
+  "feedback_md5": "676229c85549da0e78ef41f47d489ed0",
+  "export_report": "results/loop/fault_injection/export_report.json",
+  "calibration": {
+    "source": "fitted",
+    "temperature": 1.9900664741253182,
+    "file": "results/retrain/a86807ab505243fab23168a780b756da/calibration.json"
+  },
+  "kaggle_wall_time_s": 183,
+  "kaggle_training_time_s": 26,
+  "retrain_record": "results/retrain/cycle_a86807ab505243fab23168a780b756da.json",
+  "champion_version": "5",
+  "challenger_version": "6",
+  "val_macro_f1": {
+    "champion": 0.9944429008057795,
+    "challenger": 0.7427780631170462
+  },
+  "val_macro_f1_source": "champion: results/promotion/gate_5.2.json; challenger: its val_metrics.json (same val images and metric; the gate did not run)",
+  "decision": "stopped_before_gate",
+  "failed_checks": [
+    "review_threshold_risk (ADR-023)"
+  ],
+  "checks": {
+    "review_threshold_risk (ADR-023)": "risk upper bound 0.2934 among accepted val images is above max_risk_ucb 0.05; nothing written: the project owner decides (ADR-023)"
+  },
+  "applied": false,
+  "gate_file": null,
+  "gate_record_file": null,
+  "applied_in": null,
+  "prediction_log_counts": null
+}

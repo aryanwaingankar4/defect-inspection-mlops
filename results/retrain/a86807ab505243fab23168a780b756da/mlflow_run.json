@@ -1,0 +1,8 @@
+{
+  "experiment": "neu-training",
+  "role": "candidate",
+  "run_id": "a21c753298614156b26081171d314075",
+  "run_url": "https://dagshub.com/aryanwaingankar4/defect-inspection-mlops.mlflow/#/experiments/1/runs/a21c753298614156b26081171d314075",
+  "registered_version": "6",
+  "registered_model": "steel-defect-classifier"
+}

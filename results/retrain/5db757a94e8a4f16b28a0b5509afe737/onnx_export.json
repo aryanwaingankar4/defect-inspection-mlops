@@ -1,0 +1,91 @@
+{
+  "decision_record": "ADR-025",
+  "registered_model": "steel-defect-classifier",
+  "version": "4",
+  "alias": "challenger",
+  "run_id": "53ac9bd001124dd4b591fa81876b9ebd",
+  "model": "efficientnet_b0",
+  "timm_model": "efficientnet_b0",
+  "checkpoint_sha256": "8e39c37f0b648496b015588b2bfdd77cf0b2da046e96ea552e8d3d4f0fd054da",
+  "onnx_file": "models/onnx/steel-defect-classifier-v4.fp32.onnx",
+  "onnx_sha256": "8cbaa37b024391079cf0f0101b4da9c6eed756baa1658eb5accd7b341dc9b977",
+  "onnx_bytes": 16543325,
+  "opset": 18,
+  "graph": {
+    "input": [
+      "input",
+      "batch",
+      3,
+      224,
+      224
+    ],
+    "output": [
+      "logits",
+      "batch",
+      6
+    ],
+    "output_is": "raw logits (no softmax, no temperature)",
+    "example_input": "synthetic zeros (no dataset pixels)"
+  },
+  "classes": [
+    "crazing",
+    "inclusion",
+    "patches",
+    "pitted_surface",
+    "rolled-in_scale",
+    "scratches"
+  ],
+  "parity_split": "val",
+  "parity_applied_with": {
+    "temperature": 1.5115263565117054,
+    "review_threshold": 0.899568508940298
+  },
+  "parity": {
+    "n_images": 180,
+    "atol": 0.0001,
+    "rtol": 0.0001,
+    "rule": "|onnx - torch| <= atol + rtol * |torch| for every logit",
+    "max_tolerance_ratio": 0.3557100918287833,
+    "max_abs_logit_diff": 0.00013780593872070312,
+    "mean_abs_logit_diff": 2.0210914037845752e-05,
+    "same_class": 180,
+    "same_routing": 180,
+    "routed_torch": 9,
+    "max_abs_calibrated_confidence_diff": 8.012912481647483e-06,
+    "min_distance_to_threshold": 0.029848011575930755,
+    "passed": true,
+    "batch_check": [
+      {
+        "batch": 1,
+        "max_abs_logit_diff": 4.971027374267578e-05,
+        "max_tolerance_ratio": 0.37381032846005385,
+        "passed": true
+      },
+      {
+        "batch": 7,
+        "max_abs_logit_diff": 9.918212890625e-05,
+        "max_tolerance_ratio": 0.18035621456598502,
+        "passed": true
+      },
+      {
+        "batch": 32,
+        "max_abs_logit_diff": 0.0001049041748046875,
+        "max_tolerance_ratio": 0.3377165984489356,
+        "passed": true
+      }
+    ],
+    "val_accuracy_torch": 1.0,
+    "val_accuracy_onnx": 1.0
+  },
+  "versions": {
+    "torch": "2.15.0+cpu",
+    "onnx": "1.23.2",
+    "onnxscript": "0.7.2",
+    "onnxruntime": "1.31.1"
+  },
+  "provenance": {
+    "git_commit": "d9afbe8f7c179b734550ab0445eeafdf0b99f632",
+    "git_dirty": false,
+    "device": "cpu"
+  }
+}

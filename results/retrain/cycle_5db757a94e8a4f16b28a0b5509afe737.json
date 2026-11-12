@@ -1,0 +1,44 @@
+{
+  "decision_record": "ADR-034",
+  "fault_injection": false,
+  "note": "SIMULATED stream and SIMULATED reviewer (ADR-031); real Kaggle GPU training",
+  "commit": "cc4e971b0634987fa1a84abe39bbc78441ab9cc4",
+  "feedback": {
+    "md5": "21ee36ef49491c1f934e7828764203e1",
+    "rows": 95
+  },
+  "feedback_per_class": {
+    "crazing": 16,
+    "inclusion": 34,
+    "patches": 12,
+    "pitted_surface": 13,
+    "rolled-in_scale": 6,
+    "scratches": 14
+  },
+  "kaggle": {
+    "pushed_at": "2026-11-12T10:35:31+00:00",
+    "completed_seen_at": "2026-11-12T10:38:32+00:00",
+    "wall_time_s": 181,
+    "training_time_s": 23,
+    "device": "cuda"
+  },
+  "run_uid": "5db757a94e8a4f16b28a0b5509afe737",
+  "n_train": 245,
+  "champion_version": "3",
+  "challenger_version": "4",
+  "challenger_val_macro_f1_at_training": 1.0,
+  "calibration": {
+    "source": "inherited_T",
+    "temperature": 1.5115263565117054,
+    "fitted_temperature": 0.25,
+    "decision_record": "ADR-037"
+  },
+  "gate": {
+    "mode": "record (applied: false); @champion not moved (ADR-034)",
+    "decision": "promote",
+    "failed_checks": [],
+    "champion_val_macro_f1": 0.9944429008057795,
+    "challenger_val_macro_f1": 1.0,
+    "file": "results/promotion/gate_4.json"
+  }
+}

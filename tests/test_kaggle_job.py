@@ -28,6 +28,12 @@ def fake_git(status: str = "", remote_branches: str = "  origin/main") -> kj.Git
     return run
 
 
+def test_empty_kaggle_env_vars_are_dropped() -> None:
+    env = {"KAGGLE_USERNAME": "", "KAGGLE_KEY": "  ", "KAGGLE_CONFIG_DIR": "/x", "OTHER": ""}
+    assert sorted(kj.drop_empty_kaggle_env(env)) == ["KAGGLE_KEY", "KAGGLE_USERNAME"]
+    assert env == {"KAGGLE_CONFIG_DIR": "/x", "OTHER": ""}
+
+
 def test_pinned_commit_ok() -> None:
     assert kj.pinned_commit(fake_git()) == SHA
 
@@ -125,7 +131,7 @@ def test_template_never_prints_secrets() -> None:
     nb = json.loads(TEMPLATE.read_text(encoding="utf-8"))
     cells = [c for c in nb["cells"] if c["cell_type"] == "code"]
     code = chr(10).join("".join(c["source"]) for c in cells)
-    allowed_names = {"raw_dir"}
+    allowed_names = {"raw_dir", "feedback_csv"}  # dataset paths only
     prints = [
         n
         for n in ast.walk(ast.parse(code))

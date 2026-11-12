@@ -5,12 +5,14 @@ Full training runs on Kaggle GPU only (ADR-019). On a laptop without a GPU, only
 
     python -m src.training.train --config configs/params.yaml [--smoke] [--allow-cpu]
         [--raw-dir DIR] [--split-file CSV] [--out-checkpoint PT] [--out-dir DIR] [--num-workers N]
-        [--model TIMM_NAME]
+        [--model TIMM_NAME] [--feedback CSV --feedback-md5 MD5]
 
 Outputs only files and needs no credentials (ADR-020): the checkpoint, ``val_metrics.json``
 (metrics, provenance, timing, checkpoint SHA-256), ``training_curves.csv/.png`` and the
-effective ``params.yaml`` in ``--out-dir``. This module never talks to MLflow: the laptop
-publishes a finished run with ``python -m src.tracking.publish`` (``make register``).
+effective ``params.yaml`` in ``--out-dir``. With ``--feedback`` (retraining, ADR-034) the train
+set is ``train_v1`` plus the checked feedback rows, always from the ImageNet base weights. This
+module never talks to MLflow: the laptop publishes a finished run with
+``python -m src.tracking.publish`` (``make register``).
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ from src.config import load_params
 from src.serving.preprocess import PreprocessConfig
 from src.training.augment import AugmentConfig
 from src.training.dataset import SplitDataset, class_names
+from src.training.feedback import Feedback, load_feedback
 from src.training.metrics import accuracy, macro_f1, per_class_f1
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -61,6 +64,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--out-dir", type=Path, help="override train.out_dir")
     parser.add_argument("--num-workers", type=int, help="override train.num_workers")
     parser.add_argument("--model", help="override train.model (a timm model name)")
+    parser.add_argument("--feedback", type=Path, help="feedback CSV to add to train (ADR-034)")
+    parser.add_argument("--feedback-md5", help="required MD5 of --feedback (from the export)")
     parser.add_argument("--smoke", action="store_true", help="tiny run; allowed on CPU")
     parser.add_argument("--allow-cpu", action="store_true", help="allow a full run without GPU")
     return parser.parse_args(argv)
@@ -371,6 +376,7 @@ def run(
     *,
     smoke: bool = False,
     repo_root: Path = REPO_ROOT,
+    feedback: Feedback | None = None,
 ) -> dict[str, Any]:
     """Train with early stopping on val macro-F1. Returns the metrics written to JSON."""
     t = params["train"]
@@ -385,6 +391,7 @@ def run(
         splits=t["train_splits"],
         augment_cfg=AugmentConfig.from_params(params),
         images_per_class=per_class,
+        extra_rows=feedback.rows if feedback else (),
         **common,
     )
     val_ds = SplitDataset(splits=[t["val_split"]], images_per_class=per_class, **common)
@@ -465,10 +472,25 @@ def run(
         "checkpoint": ckpt_path.as_posix(),
         "checkpoint_sha256": sha256_file(ckpt_path),
         "provenance": provenance,
+        "feedback": feedback.summary() if feedback else None,
         "params": {"data": params["data"], "preprocess": params["preprocess"], "train": t},
     }
     _write_outputs(metrics, curve, params, out_dir)
     return metrics
+
+
+def feedback_from_args(params: dict[str, Any], args: argparse.Namespace) -> Feedback | None:
+    """The checked feedback rows, or ``None`` without ``--feedback`` (ADR-034)."""
+    if args.feedback is None and args.feedback_md5 is None:
+        return None
+    if args.feedback is None or not args.feedback_md5:
+        raise SystemExit("--feedback and --feedback-md5 go together (ADR-034)")
+    t = params["train"]
+    split_csv = Path(params["data"]["split_file"])
+    classes = class_names(split_csv, t["train_splits"])
+    fb = load_feedback(args.feedback, args.feedback_md5, split_csv, classes)
+    print(f"feedback: {len(fb.rows)} rows, md5 {fb.md5}", flush=True)
+    return fb
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -479,7 +501,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_NEEDS_GPU
     check_gpu(device)
     print(f"device: {device.type}{'  (smoke run)' if args.smoke else ''}", flush=True)
-    metrics = run(params, device, smoke=args.smoke)
+    feedback = feedback_from_args(params, args)
+    metrics = run(params, device, smoke=args.smoke, feedback=feedback)
     print(
         f"best epoch {metrics['best_epoch']}: val macro-F1 {metrics['val_macro_f1']:.4f}; "
         f"outputs in {params['train']['out_dir']} and {metrics['checkpoint']}\n"

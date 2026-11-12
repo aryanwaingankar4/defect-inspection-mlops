@@ -1,6 +1,7 @@
 """Promotion gate (TASK-027, ADR-033): NON-INFERIORITY of ``@challenger`` against ``@champion``.
 
     make gate ARGS="--challenger-checkpoint PATH"            # dry run: prints, writes nothing
+    make gate ARGS="--challenger-checkpoint PATH --record"   # gate file only (ADR-034)
     make gate ARGS="--challenger-checkpoint PATH --apply"    # files, registry, log
 
 Both models are scored from their checkpoints (each checked against its version's
@@ -44,6 +45,8 @@ from src.training.metrics import accuracy, macro_f1, mcnemar_exact, per_class_pr
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DECISION_RECORD = "ADR-033"
 TEST_SPLIT = "test_frozen"
+# a promoted version must be servable: serving_bundle reads these tags (ADR-028, ADR-034)
+SERVING_TAGS = ("ood_energy_threshold", "serving_precision")
 CHECKS = ("macro_f1", "class_recall", "mcnemar", "onnx_parity")
 
 
@@ -330,6 +333,12 @@ def apply_decision(
         str(aliases.get(challenger_alias)) != chall["version"]
     ):
         raise GateError("@champion or @challenger moved while the gate ran: run it again")
+    missing = [t for t in SERVING_TAGS if not chall["tags"].get(t)]
+    if decision == "promote" and missing:
+        raise GateError(
+            f"challenger v{chall['version']} passed the gate but is not servable (no {missing}): "
+            "not promoted (ADR-034)"
+        )
     tags = {
         "gate_decision": decision,
         "gate_decision_record": DECISION_RECORD,
@@ -376,6 +385,17 @@ def log_entry(
 # ---------------------------------------------------------------- run
 
 
+def version_checkpoint(params: Mapping[str, Any], version: str) -> Path:
+    """Where a registered version's checkpoint is kept (DVC-tracked, ADR-034)."""
+    return Path(params["retrain"]["versions_dir"]) / f"v{version}" / "best.pt"
+
+
+def default_champion_checkpoint(params: Mapping[str, Any], version: str) -> Path:
+    """``models/versions/v<champion>/best.pt``, else the first model's local checkpoint."""
+    kept = version_checkpoint(params, version)
+    return kept if kept.is_file() else Path(params["compare_val"]["models"][0]["checkpoint"])
+
+
 def write_json(path: Path, data: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes((json.dumps(data, indent=2) + "\n").encode())
@@ -387,7 +407,10 @@ def run(
     champion_checkpoint: Path | None = None,
     *,
     do_apply: bool = False,
+    record_only: bool = False,
 ) -> dict[str, Any]:
+    """Dry run by default. ``record_only``: also write the gate file (``applied: false``) and
+    nothing else (ADR-034). ``do_apply``: gate file, registry and promotion log (ADR-033)."""
     import mlflow
 
     from src.tracking import mlflow_tracking as mt
@@ -397,7 +420,7 @@ def run(
     cfg = GateConfig.from_params(params)
     champ, chall = resolve(params)
     if champion_checkpoint is None:
-        champion_checkpoint = Path(params["compare_val"]["models"][0]["checkpoint"])
+        champion_checkpoint = default_champion_checkpoint(params, champ["version"])
     champ_ckpt = verified_checkpoint(champ, Path(champion_checkpoint))
     chall_ckpt = verified_checkpoint(chall, Path(challenger_checkpoint))
 
@@ -452,10 +475,13 @@ def run(
         "applied": do_apply,
     }
     out: dict[str, Any] = {"record": record}
+    gate_file = cfg.out_dir / f"gate_{chall['version']}.json"
     if not do_apply:
+        if record_only:
+            write_json(gate_file, record)
+            out["gate_file"] = gate_file
         return out
 
-    gate_file = cfg.out_dir / f"gate_{chall['version']}.json"
     write_json(gate_file, record)
     rel = gate_file.as_posix()
     sha = sha256_file(gate_file)
@@ -475,9 +501,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--config", type=Path, default=Path("configs/params.yaml"))
     parser.add_argument("--challenger-checkpoint", type=Path, required=True)
     parser.add_argument(
-        "--champion-checkpoint", type=Path, help="default: compare_val.models[0].checkpoint"
+        "--champion-checkpoint",
+        type=Path,
+        help="default: models/versions/v<champion>/best.pt, else compare_val.models[0].checkpoint",
     )
-    parser.add_argument("--apply", action="store_true", help="write files, registry and log")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--apply", action="store_true", help="write files, registry and log")
+    mode.add_argument("--record", action="store_true", help="write the gate file only")
     args = parser.parse_args(argv)
     try:
         out = run(
@@ -485,12 +515,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.challenger_checkpoint,
             args.champion_checkpoint,
             do_apply=args.apply,
+            record_only=args.record,
         )
     except GateError as exc:
         print(f"gate: {exc}", file=sys.stderr)
         return 1
     r = out["record"]
-    mode = "APPLIED" if args.apply else "DRY RUN (nothing written; pass --apply)"
+    if args.apply:
+        mode = "APPLIED"
+    elif args.record:
+        mode = "RECORDED (gate file only; registry and log unchanged)"
+    else:
+        mode = "DRY RUN (nothing written; pass --record or --apply)"
     print(
         f"{mode}: {r['decision'].upper()} challenger v{r['challenger']['version']} vs champion "
         f"v{r['champion']['version']} on {r['split']} ({r['n_images']} images, non-inferiority)"
@@ -498,8 +534,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     for key in CHECKS:
         c = r["checks"][key]
         print(f"  [{'pass' if c['passed'] else 'FAIL'}] {key}: {c['reason']}")
-    if "gate_file" in out:
+    if "log_file" in out:
         print(f"  wrote {out['gate_file'].as_posix()}; appended to {out['log_file'].as_posix()}")
+    elif "gate_file" in out:
+        print(f"  wrote {out['gate_file'].as_posix()}")
     return 0
 
 

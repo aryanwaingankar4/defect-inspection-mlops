@@ -97,6 +97,8 @@ def run_tags(metrics: Mapping[str, Any], role: str) -> dict[str, Any]:
         "n_val": metrics["n_val"],
         "n_params": metrics["n_params"],
         "published_from": "laptop",
+        **({"feedback_md5": metrics["feedback"]["md5"]} if metrics.get("feedback") else {}),
+        **({"feedback_rows": metrics["feedback"]["rows"]} if metrics.get("feedback") else {}),
     }
 
 

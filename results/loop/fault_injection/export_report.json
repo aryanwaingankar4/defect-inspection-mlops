@@ -1,0 +1,40 @@
+{
+  "FAULT_INJECTION": true,
+  "decision_record": "ADR-036",
+  "note": "BROKEN simulated reviewer: every label of the real export moved to the next class. A copy for one gate test; never part of the feedback history.",
+  "rule": "shift_to_next_class",
+  "class_order": [
+    "crazing",
+    "inclusion",
+    "patches",
+    "pitted_surface",
+    "rolled-in_scale",
+    "scratches"
+  ],
+  "source": {
+    "report": "results/feedback/export_report.json",
+    "csv_md5": "7d983acda5b2e7a28c33c2c875e33b58",
+    "rows": 121
+  },
+  "rows": 121,
+  "labels_changed": 121,
+  "per_class": {
+    "crazing": 20,
+    "inclusion": 21,
+    "patches": 40,
+    "pitted_surface": 16,
+    "rolled-in_scale": 17,
+    "scratches": 7
+  },
+  "per_class_true": {
+    "crazing": 21,
+    "inclusion": 40,
+    "patches": 16,
+    "pitted_surface": 17,
+    "rolled-in_scale": 7,
+    "scratches": 20
+  },
+  "csv": "data/feedback_fault/feedback.csv",
+  "csv_md5": "676229c85549da0e78ef41f47d489ed0",
+  "exported_at": "2026-11-12T11:33:13Z"
+}

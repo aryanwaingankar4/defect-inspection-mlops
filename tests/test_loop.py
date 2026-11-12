@@ -426,7 +426,13 @@ def test_committed_loop_readme_matches_the_summary():
     summary = json.loads((out / "loop_summary.json").read_text("utf-8"))
     assert (out / "README.md").read_text("utf-8") == lp.render_readme(summary)
     for c in summary["cycles"]:
-        assert (REPO_ROOT / c["gate_file"]).is_file() and (REPO_ROOT / c["file"]).is_file()
+        assert (REPO_ROOT / c["file"]).is_file()
+        if c["gate_file"] is None:  # only a fault run stopped before the gate (ADR-036)
+            assert c["fault_injection"] and c["decision"] == "stopped_before_gate"
+            retrain = json.loads((REPO_ROOT / c["retrain_record"]).read_text("utf-8"))
+            assert retrain["gate"]["file"] is None and retrain["gate"]["reason"]
+            assert not c["applied"]
+            continue
         gate = json.loads((REPO_ROOT / c["gate_file"]).read_text("utf-8"))
         assert gate["decision"] == c["decision"] and gate["applied"] == c["applied"]
         if c["fault_injection"]:

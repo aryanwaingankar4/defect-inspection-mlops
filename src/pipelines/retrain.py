@@ -701,10 +701,14 @@ def main(argv: list[str] | None = None) -> int:
     d = state.data
     if args.fault_injection:
         print("FAULT-INJECTION run (ADR-036): never promoted; @challenger released")
+    if d.get(STOPPED):
+        gate = f"STOPPED before the gate ({d[STOPPED]['check']}): {d[STOPPED]['reason']}"
+    else:
+        gate = f"gate (record only) -> {d['gate_file']}"
     print(
         f"SIMULATED-loop cycle done: {d['feedback_rows']} feedback rows -> challenger "
-        f"v{d['version']}; Kaggle {d['kaggle_wall_time_s']} s; gate (record only) -> "
-        f"{d['gate_file']}; cycle record {d['cycle_file']}"
+        f"v{d['version']}; Kaggle {d['kaggle_wall_time_s']} s; {gate}; "
+        f"cycle record {d['cycle_file']}"
     )
     print("Commit results/ + models/versions.dvc and run `make push` (DVC).")
     return 0

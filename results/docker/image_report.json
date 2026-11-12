@@ -1,12 +1,14 @@
 {
   "image": "defect-inspection-api:local",
-  "size_mb": 131.6,
+  "size_mb": 138.5,
   "size_source": "docker image inspect .Size",
   "user_id": 10001,
   "read_only_root_filesystem": true,
-  "git_commit": "97c481e",
+  "git_commit": "9f76192",
   "model_version": "5",
   "onnx_sha256": "c4e6332e11bfd4dac0aee7e46e5efd850b5b1508f73a96c92bf886993c6063f5",
   "smoke_passed": true,
-  "checked_by": "make docker-smoke (scripts/docker_smoke.py)"
+  "checked_by": "make docker-smoke (scripts/docker_smoke.py)",
+  "database": "sqlite",
+  "schema_revision": "0001"
 }

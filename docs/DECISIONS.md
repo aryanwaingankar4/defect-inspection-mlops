@@ -414,3 +414,23 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
   - Each cycle adds only about as many labels as its chunk routes (about 6% in the pilot). Val has 180 images, so differences between cycles are mostly within noise; the summary says so.
   - The fault-injection model is registered and kept like any version, but it can never be promoted.
   - Three Kaggle runs: cycle 2, cycle 3 and the fault run.
+
+## ADR-037 — Retrain calibration: inherit the champion's T when the val fit hits its bound
+- **Context:** **This rule was added after cycle 2 of TASK-030 exposed a gap.** ADR-006 says a temperature fit on a range bound writes nothing and stops. The cycle-2 challenger (v4) classified all 180 val images correctly. With no errors, mean NLL keeps falling as T → 0, so the fit always lands on `calibrate.t_min`. `make retrain` stopped at `calibrate`, and the challenger could never reach the gate. The gate (ADR-033) does not use T, but a promoted version must be servable, which needs T, the review threshold and the OOD threshold. So any challenger with a perfect val score, and more generally any challenger whose fit hits a bound, was locked out.
+- **Decision (owner decision of 2026-11-12, written and committed before the code):**
+  - **General rule for every retrain** (`make retrain`, including the fault-injection run of ADR-036), not a v4 special case. If the challenger's val fit sits on either bound of `[t_min, t_max]`, the challenger **inherits the current champion's validated T**: the `temperature` tag of the `@champion` version recorded at preflight. Otherwise the fitted T is used, as before.
+  - The challenger's `calibration.json` records:
+    - `calibration: inherited_T` (or `fitted`);
+    - the bound fit itself (`fit.temperature`, `fit.at_bound: true`);
+    - where T came from (champion version and T);
+    - the val reports with the inherited T, plus the cross-fitted report.
+  - `at_bound` describes the T in use, so it is `false` for an inherited T.
+  - The version is tagged `calibration=inherited_T` (fitted versions are tagged `calibration=fitted`). The retrain cycle record and the loop summary table show it.
+  - Everything after calibration is unchanged and still computed on the challenger's own val logits with the T in use: the review threshold (ADR-023, including its risk check), the ONNX parity check, the OOD threshold (ADR-027) and the gate.
+  - `make calibrate` outside a retrain keeps the ADR-006 behaviour: a bound fit stops the run.
+- **Reason:** A bound fit says that val cannot determine T for this model. It does not say the model is unusable. The champion's T is the only temperature this system has validated (fitted on val off its bound), and the challenger shares its architecture, training recipe and data (ADR-034). Inheriting it is the least arbitrary choice, and it is recorded rather than hidden. Resetting to T = 1 would replace a validated value with an assumption.
+- **Consequences:**
+  - An inherited T is **not validated for the challenger**. Its confidences may be miscalibrated by an unknown amount, and the val ECE reported with the inherited T rests on zero errors.
+  - The review threshold still routes the least confident 5% of val (ADR-023), so routing stays bounded even if T is off.
+  - A chain of inherited Ts is possible if several champions in a row inherit; each version's tags and `calibration.json` show where its T came from.
+  - v4 resumes from `calibrate` under this rule. Nothing is retrained.

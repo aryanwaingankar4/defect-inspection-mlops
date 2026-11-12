@@ -19,6 +19,7 @@ Steps:
                     keep the checkpoint in ``models/versions/v<version>/``
   calibrate         temperature + review threshold on val for the challenger (ADR-006/023)
   challenger        version tags, then ``@challenger`` -> the new version
+  serving           FP32 ONNX + parity, ``serving_precision``, OOD threshold on val (ADR-035)
   versions          ``dvc add models/versions`` (commit models/versions.dvc, then ``make push``)
   gate              promotion gate in RECORD mode: gate file only, @champion never moves here
   record            ``results/retrain/cycle_<run_uid>.json``
@@ -52,6 +53,7 @@ STEPS = (
     "register",
     "calibrate",
     "challenger",
+    "serving",
     "versions",
     "gate",
     "record",
@@ -340,14 +342,13 @@ def step_register(params: Mapping[str, Any], state: State) -> None:
     )
 
 
-def challenger_params(params: Mapping[str, Any], state: State, model: str) -> dict[str, Any]:
-    """``params`` with the challenger as the main model (calibrate/threshold read it there)."""
+def challenger_params(
+    params: Mapping[str, Any], model: str, checkpoint: Path | str, results_dir: Path | str
+) -> dict[str, Any]:
+    """``params`` with the challenger as the main model (calibrate, threshold and OOD read it
+    there)."""
     p = copy.deepcopy(dict(params))
-    main = {
-        "name": model,
-        "checkpoint": state["challenger_checkpoint"],
-        "results_dir": state["results_dir"],
-    }
+    main = {"name": model, "checkpoint": str(checkpoint), "results_dir": str(results_dir)}
     p["compare_val"]["models"] = [main, *p["compare_val"]["models"][1:]]
     p["train"] = {**p["train"], "model": model}
     return p
@@ -370,7 +371,10 @@ def step_calibrate(params: Mapping[str, Any], state: State) -> None:
         raise RetrainError(f"challenger temperature {result['cal']['temperature']} on its bound")
     files = cal.write_outputs(result)
     cal.log_to_mlflow(params, spec, files)
-    thr = th.run(challenger_params(params, state, metrics["model"]), log_mlflow=True)
+    p = challenger_params(
+        params, metrics["model"], state["challenger_checkpoint"], state["results_dir"]
+    )
+    thr = th.run(p, log_mlflow=True)
     state.finish(
         "calibrate",
         temperature=float(result["cal"]["temperature"]),
@@ -393,6 +397,57 @@ def step_challenger(params: Mapping[str, Any], state: State) -> None:
     alias = str(params["promotion"]["challenger_alias"])
     before = mt.move_alias(cfg, alias, state["version"])  # tags first, alias last
     state.finish("challenger", previous_challenger=before)
+
+
+SERVING_PRECISION = "fp32"  # challengers serve FP32 like v2 (ADR-026, ADR-035)
+
+
+def prepare_serving(
+    params: Mapping[str, Any], version: Mapping[str, Any], checkpoint: Path, results_dir: Path
+) -> dict[str, Any]:
+    """Make a registered version servable (ADR-035): FP32 ONNX with parity on val (tags only if
+    it passes), ``serving_precision``, and the energy OOD threshold on val at its own T."""
+    from src.tracking import mlflow_tracking as mt
+    from src.training import export_onnx as ex
+    from src.training import ood
+
+    if not checkpoint.is_file() or sha256(checkpoint) != version["tags"]["checkpoint_sha256"]:
+        raise RetrainError(f"{checkpoint} is not the checkpoint of v{version['version']}")
+    model = str(version["tags"]["model"])
+    p = challenger_params(params, model, checkpoint, results_dir)
+    alias = str(version["alias"])
+    try:
+        export = ex.run(
+            p, alias=alias, checkpoint=checkpoint, report_file=results_dir / "onnx_export.json",
+            log_mlflow=True,
+        )  # fmt: skip
+    except ex.ExportError as exc:
+        raise RetrainError(f"ONNX export of v{version['version']} failed: {exc}") from exc
+    cfg = mt.TrackingConfig.from_params(params, smoke=False)
+    mt.set_version_tags(cfg, version["version"], {"serving_precision": SERVING_PRECISION})
+    try:
+        out = ood.run(p, alias=alias, onnx_path=export["onnx"], log_mlflow=True)
+    except ood.OodError as exc:
+        raise RetrainError(f"OOD threshold of v{version['version']} failed: {exc}") from exc
+    return {
+        "onnx_sha256": export["report"]["onnx_sha256"],
+        "parity_passed": export["report"]["parity"]["passed"],
+        "ood_energy_threshold": out["result"]["ood_energy_threshold"],
+        "ood_file": Path(out["out"]).as_posix(),
+        "onnx_report": (results_dir / "onnx_export.json").as_posix(),
+    }
+
+
+def step_serving(params: Mapping[str, Any], state: State) -> None:
+    from src.training import export_onnx as ex
+
+    version = ex.registered_version(params, str(params["promotion"]["challenger_alias"]))
+    if version["version"] != state["version"]:
+        raise RetrainError(f"@challenger is v{version['version']}, not v{state['version']}")
+    done = prepare_serving(
+        params, version, Path(state["challenger_checkpoint"]), Path(state["results_dir"])
+    )
+    state.finish("serving", ood_energy_threshold=done["ood_energy_threshold"])
 
 
 def step_versions(params: Mapping[str, Any], state: State) -> None:
@@ -456,6 +511,7 @@ def run(params: Mapping[str, Any], *, fresh: bool = False, api_factory=kaggle_ap
         "register": lambda: step_register(params, state),
         "calibrate": lambda: step_calibrate(params, state),
         "challenger": lambda: step_challenger(params, state),
+        "serving": lambda: step_serving(params, state),
         "versions": lambda: step_versions(params, state),
         "gate": lambda: step_gate(params, state),
         "record": lambda: step_record(params, state),

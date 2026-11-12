@@ -14,6 +14,7 @@ PyTorch-based ``val_predictions.csv``. Never reads ``test_frozen``.
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import hashlib
 import io
@@ -111,11 +112,37 @@ def check_against_csv(params: Mapping[str, Any], path: str, out: Mapping[str, An
         raise GoldenError(f"{path}: calibrated confidence differs from val_predictions.csv")
 
 
+def check_predictions_belong_to(params: Mapping[str, Any], manifest: Mapping[str, Any]) -> None:
+    """``val_predictions.csv`` must come from the bundle's checkpoint (its ``calibration.json``
+    next to it records the checkpoint hash), e.g. after a promotion (ADR-035)."""
+    want = manifest.get("checkpoint_sha256")
+    cal = csv_path(params).parent / "calibration.json"
+    if want and cal.is_file():
+        got = json.loads(cal.read_text(encoding="utf-8")).get("checkpoint_sha256")
+        if got != want:
+            raise GoldenError(
+                f"{csv_path(params).as_posix()} belongs to another checkpoint than the bundle "
+                f"(v{manifest.get('version')}): pass --val-predictions for this version"
+            )
+
+
+def with_predictions(params: Mapping[str, Any], csv_file: Path | None) -> dict[str, Any]:
+    """``params`` reading ``val_predictions.csv`` from ``csv_file``'s folder (ADR-035)."""
+    p = copy.deepcopy(dict(params))
+    if csv_file is not None:
+        if Path(csv_file).name != "val_predictions.csv":
+            raise GoldenError("--val-predictions must point to a val_predictions.csv")
+        main = {**p["compare_val"]["models"][0], "results_dir": str(Path(csv_file).parent)}
+        p["compare_val"]["models"] = [main, *p["compare_val"]["models"][1:]]
+    return p
+
+
 def build_expected(params: Mapping[str, Any], bundle_dir: Path, png: bytes) -> dict[str, Any]:
     pre = PreprocessConfig.from_params(params)
     vcfg = ValidationConfig.from_params(params)
     bundle = load_bundle(bundle_dir, params["preprocess"])
     m = bundle.manifest
+    check_predictions_belong_to(params, m)
     raw = Path(params["data"]["raw_dir"])
     images = [{"id": "synthetic", "source": SYNTHETIC_NAME, "data": png}]
     images += [
@@ -170,8 +197,13 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--config", default="configs/params.yaml")
     parser.add_argument("--out-dir", default="tests/golden")
+    parser.add_argument(
+        "--val-predictions",
+        type=Path,
+        help="the champion's val_predictions.csv (default: compare_val.models[0]; ADR-035)",
+    )
     args = parser.parse_args(argv)
-    e = write(load_params(args.config), Path(args.out_dir))
+    e = write(with_predictions(load_params(args.config), args.val_predictions), Path(args.out_dir))
     c = e["champion"]
     print(f"golden -> {args.out_dir}/ ({SYNTHETIC_NAME}, {EXPECTED_NAME}; ADR-017)")
     print(

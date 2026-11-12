@@ -44,7 +44,7 @@ from src.training.evaluate import (
     near_copy_groups_within,
     unit_ids,
 )
-from src.training.export_onnx import ExportConfig, champion
+from src.training.export_onnx import ExportConfig, champion, registered_version
 from src.training.metrics import (
     auroc,
     budget_threshold,
@@ -251,18 +251,41 @@ def batched_logits(session: OnnxClassifier, x: np.ndarray, batch: int) -> np.nda
     return np.concatenate([session.logits(x[i : i + batch]) for i in range(0, len(x), batch)])
 
 
-def run(params: Mapping[str, Any], *, log_mlflow: bool = False) -> dict[str, Any]:
+def tagged_fp32_onnx(version: Mapping[str, Any], path: Path) -> tuple[Path, str]:
+    """An explicit FP32 ONNX file (a challenger's, ADR-035), checked against ``onnx_sha256``."""
+    if not path.is_file():
+        raise OodError(f"missing {path}")
+    if sha256_file(path) != version["tags"].get("onnx_sha256"):
+        raise OodError(f"{path} is not the fp32 file tagged on @{version['alias']} (ADR-035)")
+    return path, "fp32"
+
+
+def run(
+    params: Mapping[str, Any],
+    *,
+    log_mlflow: bool = False,
+    alias: str | None = None,
+    onnx_path: Path | None = None,
+) -> dict[str, Any]:
+    """The champion by default; ``alias`` + ``onnx_path`` for a challenger (ADR-035). The model's
+    calibration is read from ``compare_val.models[0]`` (callers put the challenger there)."""
     cfg = OodConfig.from_params(params)
     val_split = str(params["train"]["val_split"])
     if val_split == PROTECTED_SPLIT:
         raise OodError(f"the OOD threshold never uses '{PROTECTED_SPLIT}' (ADR-027)")
-    champ = champion(params)
-    onnx_path, precision = serving_onnx(params, champ)
+    if alias is None:
+        champ = champion(params)
+        onnx_path, precision = serving_onnx(params, champ)
+    else:
+        if onnx_path is None:
+            raise OodError(f"the OOD threshold of @{alias} needs its ONNX file")
+        champ = registered_version(params, alias)
+        onnx_path, precision = tagged_fp32_onnx(champ, Path(onnx_path))
     spec = specs_from_params(params["compare_val"])[0]
     temperature_cal, cal_path = load_temperature(params, spec)
     temperature = float(champ["tags"]["temperature"])
     if temperature != temperature_cal:
-        raise OodError("the champion's temperature tag differs from its calibration.json")
+        raise OodError(f"@{champ['alias']}'s temperature tag differs from its calibration.json")
     review_threshold = float(champ["tags"]["review_threshold"])
     session = OnnxClassifier(onnx_path)
     classes = session.classes

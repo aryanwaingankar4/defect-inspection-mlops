@@ -1,0 +1,7 @@
+{
+  "stream": "simulated, production_stream (ADR-031)",
+  "chunk": "all 1,110 production_stream images (pilot)",
+  "sent": 1110,
+  "routed_to_review": 67,
+  "source": "prediction log (loop_counts), read before cycle 2"
+}

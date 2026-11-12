@@ -1,0 +1,7 @@
+{
+  "reviewer": "simulated (ADR-031)",
+  "error_rate": 0.0,
+  "labelled": 67,
+  "flipped": 0,
+  "source": "prediction log (loop_counts), read before cycle 2"
+}

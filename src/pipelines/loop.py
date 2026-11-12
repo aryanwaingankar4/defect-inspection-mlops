@@ -202,6 +202,45 @@ def calibration_of(params: Mapping[str, Any], retrain: Mapping[str, Any]) -> dic
     return out
 
 
+def stopped_fault_record(params: Mapping[str, Any]) -> Path:
+    found = [
+        p
+        for p in sorted(Path(params["retrain"]["results_dir"]).glob("cycle_*.json"))
+        if read_json(p).get("fault_injection") and read_json(p)["gate"]["file"] is None
+    ]
+    if len(found) != 1:
+        raise LoopError(f"expected one fault run stopped before the gate, found {len(found)}")
+    return found[0]
+
+
+def champion_val_macro_f1(params: Mapping[str, Any], version: str) -> tuple[float, str]:
+    """The champion's val macro-F1 from the applied gate file that promoted it."""
+    log = read_json(params["promotion"]["log_file"])
+    for entry in reversed(log):
+        if entry.get("decision") == "promote" and str(entry.get("version")) == str(version):
+            gate = read_json(entry["gate_file"])
+            return float(gate["challenger_metrics"]["macro_f1"]), entry["gate_file"]
+    raise LoopError(f"no applied promotion of v{version} in the promotion log")
+
+
+def stopped_gate(params: Mapping[str, Any], retrain: Mapping[str, Any]) -> dict[str, Any]:
+    """A gate-shaped view of a run refused before the gate (nothing was gated)."""
+    g = retrain["gate"]
+    champ_f1, champ_src = champion_val_macro_f1(params, retrain["champion_version"])
+    return {
+        "decision": g["decision"],
+        "failed_checks": g["failed_checks"],
+        "checks": {g["failed_checks"][0]: {"reason": g["reason"]}},
+        "applied": False,
+        "champion": {"version": retrain["champion_version"]},
+        "challenger": {"version": retrain["challenger_version"]},
+        "champion_metrics": {"macro_f1": champ_f1},
+        "challenger_metrics": {"macro_f1": retrain["challenger_val_macro_f1_at_training"]},
+        "val_macro_f1_source": f"champion: {champ_src}; challenger: its val_metrics.json "
+        "(same val images and metric; the gate did not run)",
+    }
+
+
 def pilot_facts(counts: Mapping[str, Any], pilot_rows: int) -> tuple[dict, dict]:
     """The pilot's stream and review summaries, read back from the prediction log. Only valid
     before cycle 2 starts: every prediction must be v2's and every label the pilot's."""
@@ -236,10 +275,18 @@ def record_cycle(
     review facts from the log)."""
     fault = cycle == FAULT
     folder = cycle_dir(params, cycle)
-    gate = read_json(gate_file)
-    version = str(gate["challenger"]["version"])
-    retrain_path = retrain_record_for(params, version)
-    retrain = read_json(retrain_path)
+    if gate_file is None:  # a fault run refused before the gate (ADR-036 amendment)
+        if not fault:
+            raise LoopError("only the fault-injection run may be recorded without a gate file")
+        retrain_path = stopped_fault_record(params)
+        retrain = read_json(retrain_path)
+        version = str(retrain["challenger_version"])
+        gate = stopped_gate(params, retrain)
+    else:
+        gate = read_json(gate_file)
+        version = str(gate["challenger"]["version"])
+        retrain_path = retrain_record_for(params, version)
+        retrain = read_json(retrain_path)
     if bool(retrain.get("fault_injection")) != fault:
         raise LoopError(f"v{version} fault_injection={retrain.get('fault_injection')}: wrong cycle")
     if fault and gate["applied"]:
@@ -300,13 +347,20 @@ def record_cycle(
             "champion": gate["champion_metrics"]["macro_f1"],
             "challenger": gate["challenger_metrics"]["macro_f1"],
         },
+        "val_macro_f1_source": gate.get("val_macro_f1_source", "gate file"),
         "decision": gate["decision"],
         "failed_checks": gate["failed_checks"],
         "checks": {k: v["reason"] for k, v in gate["checks"].items()},
         "applied": gate["applied"],
-        "gate_file": Path(gate_file).as_posix(),
+        "gate_file": None if gate_file is None else Path(gate_file).as_posix(),
         "gate_record_file": retrain["gate"]["file"],
-        "applied_in": gate_file.as_posix() if gate["applied"] else applied_in(params, version),
+        "applied_in": (
+            None
+            if gate_file is None
+            else gate_file.as_posix()
+            if gate["applied"]
+            else applied_in(params, version)
+        ),
         "prediction_log_counts": None if fault else db_counts,
     }
     if not fault and report_src != saved:  # only once every check has passed
@@ -319,6 +373,8 @@ def record_cycle(
 
 
 def verdict(c: Mapping[str, Any]) -> str:
+    if c["decision"] == "stopped_before_gate":
+        return "STOPPED before the gate (fault injection; gate not run)"
     v = c["decision"].upper()
     if c["fault_injection"]:
         return f"{v} (record only: fault injection)"
@@ -355,7 +411,7 @@ def table_rows(summary: Mapping[str, Any]) -> list[list[str]]:
                 f"v{c['challenger_version']} {f1['challenger']:.4f}",
                 verdict(c)
                 + (f" — failed: {', '.join(c['failed_checks'])}" if c["failed_checks"] else ""),
-                f"`{c['gate_file']}`",
+                f"`{c['gate_file']}`" if c["gate_file"] else "none (gate not reached)",
             ]
         )
     return rows
@@ -604,7 +660,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     sub.add_parser("fault-export")
     rec = sub.add_parser("record")
     rec.add_argument("--cycle", required=True, help="1, 2, 3, ... or 'fault'")
-    rec.add_argument("--gate-file", type=Path, required=True)
+    rec.add_argument("--gate-file", type=Path, help="omit only for a fault run stopped before it")
     sub.add_parser("final")
     sub.add_parser("summary")
     args = parser.parse_args(argv)

@@ -506,3 +506,41 @@ def test_re_recording_a_cycle_uses_its_saved_export_report(loop_files):
         Path(params["review"]["export"]["out_dir"]), [], Path(params["review"]["export"]["report"])
     )
     assert lp.record_cycle(params, "2", applied, COUNTS) == first
+
+
+def test_a_fault_run_stopped_before_the_gate_is_recorded_without_a_gate_file(loop_files, tmp_path):
+    params, _, applied = loop_files
+    report = lp.fault_export(params)
+    log = [{"decision": "promote", "version": "4", "gate_file": applied.as_posix()}]
+    Path(params["promotion"]["log_file"]).write_text(json.dumps(log), "utf-8")
+    folder = Path(params["retrain"]["results_dir"])
+    (folder / "fff").mkdir(parents=True)
+    (folder / "fff" / "calibration.json").write_text(
+        json.dumps({"calibration": "fitted", "temperature": 1.3}), "utf-8"
+    )
+    record = {
+        "run_uid": "fff",
+        "fault_injection": True,
+        "champion_version": "4",
+        "challenger_version": "6",
+        "challenger_val_macro_f1_at_training": 0.74,
+        "feedback": {"md5": report["csv_md5"], "rows": 7},
+        "kaggle": {"wall_time_s": 183, "training_time_s": 26},
+        "gate": {
+            "decision": "stopped_before_gate",
+            "failed_checks": ["review_threshold_risk (ADR-023)"],
+            "reason": "risk upper bound 0.29 above 0.05",
+            "file": None,
+        },
+    }
+    (folder / "cycle_fff.json").write_text(json.dumps(record), "utf-8")
+    r = lp.record_cycle(params, lp.FAULT, None)
+    assert r["decision"] == "stopped_before_gate" and r["gate_file"] is None
+    assert r["val_macro_f1"] == {"champion": 0.99, "challenger": 0.74}
+    assert "gate did not run" in r["val_macro_f1_source"]
+    with pytest.raises(lp.LoopError, match="only the fault-injection run"):
+        lp.record_cycle(params, "2", None, COUNTS)
+    lp.record_cycle(params, "2", applied, COUNTS)
+    row = lp.render_table(lp.summarise(params)).splitlines()[3]
+    assert "STOPPED before the gate" in row and "none (gate not reached)" in row
+    assert "review_threshold_risk (ADR-023)" in row

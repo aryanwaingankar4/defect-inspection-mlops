@@ -184,8 +184,8 @@ loop-chunks: ## Disjoint stream chunks after the pilot -> data/splits/loop_chunk
 	$(RUN) python -m src.pipelines.loop --config $(PARAMS) chunks
 
 loop-record: ## Record a loop cycle: CYCLE=n|fault GATE=gate file -> results/loop/ (ADR-036)
-	@test -n "$(CYCLE)" -a -n "$(GATE)" || { echo "usage: make loop-record CYCLE=n GATE=results/promotion/gate_<v>.json"; exit 1; }
-	$(RUN_SERVE) $(ENV_FILE) python -m src.pipelines.loop --config $(PARAMS) record --cycle $(CYCLE) --gate-file $(GATE)
+	@test -n "$(CYCLE)" || { echo "usage: make loop-record CYCLE=n GATE=results/promotion/gate_<v>.json"; exit 1; }
+	$(RUN_SERVE) $(ENV_FILE) python -m src.pipelines.loop --config $(PARAMS) record --cycle $(CYCLE) $(if $(GATE),--gate-file $(GATE),)
 
 fault-export: ## FAULT INJECTION: copy of the export with every label shifted -> data/feedback_fault/ (never real feedback; ADR-036)
 	$(RUN) python -m src.pipelines.loop --config $(PARAMS) fault-export

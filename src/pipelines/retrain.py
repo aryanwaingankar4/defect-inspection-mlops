@@ -226,7 +226,9 @@ def challenger_tags(
     }
 
 
-def cycle_record(state: State, gate_record: Mapping[str, Any], gate_file: str) -> dict[str, Any]:
+def cycle_record(
+    state: State, gate_record: Mapping[str, Any] | None, gate_file: str | None
+) -> dict[str, Any]:
     d = state.data
     fault = bool(d.get("fault_injection"))
     note = "SIMULATED stream and SIMULATED reviewer (ADR-031); real Kaggle GPU training"
@@ -260,14 +262,35 @@ def cycle_record(state: State, gate_record: Mapping[str, Any], gate_file: str) -
             "fitted_temperature": d.get("fitted_temperature"),
             "decision_record": "ADR-037" if d.get("calibration") == "inherited_T" else "ADR-006",
         },
-        "gate": {
-            "mode": "record (applied: false); @champion not moved (ADR-034)",
-            "decision": gate_record["decision"],
-            "failed_checks": gate_record["failed_checks"],
-            "champion_val_macro_f1": gate_record["champion_metrics"]["macro_f1"],
-            "challenger_val_macro_f1": gate_record["challenger_metrics"]["macro_f1"],
-            "file": gate_file,
-        },
+        "gate": gate_block(d, gate_record, gate_file),
+    }
+
+
+STOPPED = "stopped_before_gate"
+SKIPPED_WHEN_STOPPED = ("challenger", "serving", "gate")
+
+
+def gate_block(
+    d: Mapping[str, Any], gate_record: Mapping[str, Any] | None, gate_file: str | None
+) -> dict[str, Any]:
+    stop = d.get(STOPPED)
+    if stop:  # fault run refused before the gate (ADR-036 amendment)
+        return {
+            "mode": "not reached: refused before the gate; the gate's checks were not evaluated",
+            "decision": STOPPED,
+            "failed_checks": [stop["check"]],
+            "stopped_at": stop["step"],
+            "reason": stop["reason"],
+            "file": None,
+        }
+    assert gate_record is not None
+    return {
+        "mode": "record (applied: false); @champion not moved (ADR-034)",
+        "decision": gate_record["decision"],
+        "failed_checks": gate_record["failed_checks"],
+        "champion_val_macro_f1": gate_record["champion_metrics"]["macro_f1"],
+        "challenger_val_macro_f1": gate_record["challenger_metrics"]["macro_f1"],
+        "file": gate_file,
     }
 
 
@@ -446,7 +469,24 @@ def step_calibrate(params: Mapping[str, Any], state: State) -> None:
     p = challenger_params(
         params, metrics["model"], state["challenger_checkpoint"], state["results_dir"]
     )
-    thr = th.run(p, log_mlflow=True)
+    try:
+        thr = th.run(p, log_mlflow=True)
+    except th.ThresholdError as exc:
+        if not state.data.get("fault_injection"):
+            raise RetrainError(f"review threshold refused (ADR-023): {exc}") from exc
+        state.finish(  # ADR-036 amendment: the fault run's outcome, recorded
+            "calibrate",
+            calibration=result["cal"]["calibration"],
+            fitted_temperature=float(result["cal"]["fit"]["temperature"]),
+            temperature=float(result["cal"]["temperature"]),
+            review_threshold=None,
+            stopped_before_gate={
+                "step": "calibrate",
+                "check": "review_threshold_risk (ADR-023)",
+                "reason": str(exc),
+            },
+        )
+        return
     state.finish(
         "calibrate",
         calibration=result["cal"]["calibration"],
@@ -549,11 +589,13 @@ def step_gate(params: Mapping[str, Any], state: State) -> None:
 
 
 def step_record(params: Mapping[str, Any], state: State) -> Path:
-    gate_file = Path(state["gate_file"])
-    gate_record = json.loads(gate_file.read_text(encoding="utf-8"))
+    gate_record, gate_file = None, None
+    if not state.data.get(STOPPED):
+        gate_file = Path(state["gate_file"]).as_posix()
+        gate_record = json.loads(Path(gate_file).read_text(encoding="utf-8"))
     out = Path(params["retrain"]["results_dir"]) / f"cycle_{state['run_uid']}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
-    data = cycle_record(state, gate_record, gate_file.as_posix())
+    data = cycle_record(state, gate_record, gate_file)
     out.write_bytes((json.dumps(data, indent=2) + "\n").encode())
     state.finish("record", cycle_file=out.as_posix())
     return out
@@ -563,6 +605,9 @@ def step_release(params: Mapping[str, Any], state: State) -> None:
     """Fault injection only: ``@challenger`` back to its previous holder, or removed (ADR-036)."""
     from src.tracking import mlflow_tracking as mt
 
+    if state.data.get(STOPPED):  # @challenger was never moved to the fault version
+        state.finish("release", challenger_after_release="never moved")
+        return
     cfg = mt.TrackingConfig.from_params(params, smoke=False)
     alias = str(params["promotion"]["challenger_alias"])
     holder = mt.version_by_alias(cfg, alias)
@@ -627,6 +672,10 @@ def run(
     for name in FAULT_STEPS if fault else STEPS:
         if state.done(name):
             print(f"[done] {name}", flush=True)
+            continue
+        if state.data.get(STOPPED) and name in SKIPPED_WHEN_STOPPED:
+            print(f"[skip] {name} (stopped before the gate: {state[STOPPED]['check']})")
+            state.finish(name)
             continue
         print(f"[....] {name}", flush=True)
         steps[name]()

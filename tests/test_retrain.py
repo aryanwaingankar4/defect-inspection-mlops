@@ -648,3 +648,84 @@ def test_calibrate_step_passes_the_champion_t_and_records_the_source(tmp_path, m
     assert seen["inherit"] == {"version": "3", "temperature": 1.5}
     assert state["calibration"] == "inherited_T" and state["temperature"] == 1.5
     assert state["fitted_temperature"] == 0.25
+
+
+# ---------------------------------------------------------------- ADR-036 amendment: fault stop
+
+
+def _calibrate_with_refused_threshold(tmp_path, monkeypatch, fault):
+    from src.training import calibrate as cal
+    from src.training import threshold as th
+
+    results = tmp_path / "r"
+    results.mkdir(exist_ok=True)
+    (results / "val_metrics.json").write_text(json.dumps({"model": "efficientnet_b0"}), "utf-8")
+    fitted = {"temperature": 1.2, "at_bound": False, "calibration": "fitted"}
+    fitted["fit"] = {"temperature": 1.2, "at_bound": False}
+    monkeypatch.setattr(rt, "champion_temperature", lambda p, v: {"version": v, "temperature": 1.5})
+    monkeypatch.setattr(cal, "calibrate_model", lambda *a, **k: {"cal": fitted})
+    monkeypatch.setattr(cal, "write_outputs", lambda result: {})
+    monkeypatch.setattr(cal, "log_to_mlflow", lambda *a: "run")
+
+    def refuse(p, log_mlflow):
+        raise th.ThresholdError("risk upper bound 0.29 is above max_risk_ucb 0.05")
+
+    monkeypatch.setattr(th, "run", refuse)
+    state = rt.State(
+        tmp_path / "s.json",
+        {
+            "steps": {},
+            "champion_version": "5",
+            "results_dir": str(results),
+            "challenger_checkpoint": str(tmp_path / "c.pt"),
+            "fault_injection": fault,
+        },
+    )
+    rt.step_calibrate(PARAMS, state)
+    return state
+
+
+def test_a_fault_run_refused_by_the_threshold_is_recorded(tmp_path, monkeypatch):
+    state = _calibrate_with_refused_threshold(tmp_path, monkeypatch, fault=True)
+    stop = state[rt.STOPPED]
+    assert stop["check"].startswith("review_threshold_risk") and "0.29" in stop["reason"]
+    assert state["review_threshold"] is None and state.done("calibrate")
+    block = rt.gate_block(state.data, None, None)
+    assert block["decision"] == rt.STOPPED and block["file"] is None
+    assert "not evaluated" in block["mode"]
+
+
+def test_a_real_cycle_refused_by_the_threshold_still_stops(tmp_path, monkeypatch):
+    with pytest.raises(rt.RetrainError, match="ADR-023"):
+        _calibrate_with_refused_threshold(tmp_path, monkeypatch, fault=False)
+
+
+def test_a_stopped_fault_run_skips_the_gate_steps(tmp_path, monkeypatch):
+    p = copy.deepcopy(PARAMS)
+    p["loop"]["fault_injection"]["state_dir"] = str(tmp_path / "fault")
+    calls = []
+
+    def fake(name):
+        def step(params, state, *api):
+            calls.append(name)
+            extra = {rt.STOPPED: {"check": "review_threshold_risk"}} if name == "calibrate" else {}
+            state.finish(name, **extra)
+
+        return step
+
+    for name in rt.FAULT_STEPS:
+        monkeypatch.setattr(rt, f"step_{name}", fake(name))
+    monkeypatch.setattr(
+        rt,
+        "step_preflight",
+        lambda params, state, fault: state.finish("preflight", fault_injection=fault),
+    )
+    rt.run(p, fault=True, api_factory=lambda: "api")
+    assert "challenger" not in calls and "serving" not in calls and "gate" not in calls
+    assert calls[-3:] == ["versions", "record", "release"]
+
+
+def test_release_is_a_no_op_after_a_stop(tmp_path):
+    state = rt.State(tmp_path / "s.json", {"steps": {}, "version": "6", rt.STOPPED: {"check": "x"}})
+    rt.step_release(PARAMS, state)  # no registry call: the alias never moved
+    assert state["challenger_after_release"] == "never moved"

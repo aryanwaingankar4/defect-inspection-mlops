@@ -120,9 +120,12 @@ def test_committed_ood_result_is_consistent():
     res = REPO_ROOT / PARAMS["compare_val"]["models"][0]["results_dir"]
     cal = json.loads((res / "calibration.json").read_text(encoding="utf-8"))
     log = json.loads((REPO_ROOT / PARAMS["promotion"]["log_file"]).read_text(encoding="utf-8"))
-    assert r["decision_record"] == "ADR-027" and r["version"] == log[-1]["version"]
-    assert r["temperature"] == cal["temperature"] == log[-1]["temperature"]
-    assert r["review_threshold"] == log[-1]["review_threshold"]
+    # results/train/ is the first champion's evidence (ADR-024); later promotions (ADR-033/035)
+    # keep their own OOD result in results/retrain/<run_uid>/
+    first = next(e for e in log if e["decision"] == "initial_champion")
+    assert r["decision_record"] == "ADR-027" and r["version"] == first["version"]
+    assert r["temperature"] == cal["temperature"] == first["temperature"]
+    assert r["review_threshold"] == first["review_threshold"]
     assert r["calibration_sha256"] == sha256_file(res / "calibration.json")
     assert r["rule"]["id_flag_budget"] == CFG.id_flag_budget
     assert r["fitted_on"]["split"] == PARAMS["train"]["val_split"] != "test_frozen"

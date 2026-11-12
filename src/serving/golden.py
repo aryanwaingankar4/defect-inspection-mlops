@@ -179,6 +179,7 @@ def build_expected(params: Mapping[str, Any], bundle_dir: Path, png: bytes) -> d
             "temperature": m["temperature"],
             "review_threshold": m["review_threshold"],
             "ood_energy_threshold": m["ood_energy_threshold"],
+            "val_predictions": csv_path(params).as_posix(),  # picked the val images (ADR-035)
             "images": entries,
         },
     }

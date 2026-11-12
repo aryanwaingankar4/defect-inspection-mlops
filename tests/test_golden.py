@@ -166,7 +166,9 @@ def test_champion_on_real_neu_val_images(image_id):
 @pytest.mark.needs_data
 def test_golden_val_images_follow_the_rule_and_are_never_test_frozen(monkeypatch):
     monkeypatch.chdir(REPO_ROOT)
-    chosen = {v["id"]: v["path"] for v in gd.val_images(PARAMS)}
+    # the val images are picked from the champion's own val_predictions.csv (ADR-035)
+    params = gd.with_predictions(PARAMS, Path(EXPECTED["champion"]["val_predictions"]))
+    chosen = {v["id"]: v["path"] for v in gd.val_images(params)}
     assert chosen == {e["id"]: e["source"] for e in EXPECTED["champion"]["images"][1:]}
     with (REPO_ROOT / PARAMS["data"]["split_file"]).open(encoding="utf-8", newline="") as f:
         split_of = {r["path"]: r["split"] for r in csv.DictReader(f)}

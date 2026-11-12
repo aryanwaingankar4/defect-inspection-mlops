@@ -150,6 +150,20 @@ def test_no_champion(client, params):
 # ---------------------------------------------------------------- the real bundle
 
 
+def results_dir_of(manifest: dict) -> Path:
+    """The committed results folder of the bundle's checkpoint: results/train/ for the first
+    champion, results/retrain/<run_uid>/ for a promoted challenger (ADR-035)."""
+    candidates = [REPO_ROOT / PARAMS["compare_val"]["models"][0]["results_dir"]]
+    candidates += sorted(p for p in (REPO_ROOT / PARAMS["retrain"]["results_dir"]).glob("*/"))
+    for folder in candidates:
+        cal = folder / "calibration.json"
+        if cal.is_file() and (
+            json.loads(cal.read_text("utf-8"))["checkpoint_sha256"] == manifest["checkpoint_sha256"]
+        ):
+            return folder
+    pytest.fail(f"no committed results for the bundle's checkpoint (v{manifest['version']})")
+
+
 @pytest.mark.needs_data
 @pytest.mark.needs_model
 def test_real_bundle_reproduces_committed_val_results(database_url, audit_salt):
@@ -158,7 +172,8 @@ def test_real_bundle_reproduces_committed_val_results(database_url, audit_salt):
     bundle_dir = REPO_ROOT / PARAMS["serving"]["bundle_dir"]
     if not (bundle_dir / bd.MANIFEST_NAME).is_file():
         pytest.skip("no serving bundle: run `make serving-bundle`")
-    res = REPO_ROOT / PARAMS["compare_val"]["models"][0]["results_dir"]
+    manifest = json.loads((bundle_dir / bd.MANIFEST_NAME).read_text(encoding="utf-8"))
+    res = results_dir_of(manifest)
     ood = json.loads((res / "ood.json").read_text(encoding="utf-8"))
     with (res / "val_predictions.csv").open(encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f))

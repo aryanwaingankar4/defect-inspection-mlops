@@ -155,8 +155,8 @@ feedback-export: ## production_stream labels -> data/feedback/feedback.csv (DVC)
 	@echo "New feedback version. Commit it and back it up:"
 	@echo "  git add data/feedback.dvc results/feedback/export_report.json && make push"
 
-golden: ## Golden images + expected @champion outputs -> tests/golden/ (needs bundle + NEU val; ADR-017)
-	$(RUN_SERVE) python -m src.serving.golden --config $(PARAMS)
+golden: ## Golden images + expected @champion outputs -> tests/golden/ (needs bundle + NEU val; ADR-017). ARGS: --val-predictions CSV
+	$(RUN_SERVE) python -m src.serving.golden --config $(PARAMS) $(ARGS)
 
 openapi-snapshot: ## Rewrite the API contract tests/contract/openapi.json (only for an intended API change)
 	$(RUN_SERVE) python -m src.serving.contract --config $(PARAMS)

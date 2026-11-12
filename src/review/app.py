@@ -59,7 +59,7 @@ def resolve(path: str) -> Path:
 def resources(config: str, db_url: str) -> dict[str, Any]:
     params = load_params(config)
     db = PredictionLog(db_url)
-    db.create_tables()
+    db.require_head()  # never migrates (ADR-038): run `make db-migrate` first
     archive = ImageArchive.from_split_file(
         resolve(params["data"]["split_file"]), resolve(params["data"]["raw_dir"])
     )

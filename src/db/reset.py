@@ -18,6 +18,7 @@ from pathlib import Path
 from sqlalchemy.engine import make_url
 
 from src.config import load_params
+from src.db import migrate
 from src.db.store import PredictionLog, database_url_from_env
 
 SIDE_SUFFIXES = ("-wal", "-shm", "-journal")
@@ -62,7 +63,7 @@ def reset(url: str, archive_dir: Path | str) -> dict[str, str | None]:
     archived = archive_sqlite(url, archive_dir)
     db = PredictionLog(url)
     try:
-        db.create_tables()
+        migrate.upgrade(db.engine)  # the fresh log starts at head (ADR-038)
     finally:
         db.dispose()
     return {"archived_to": None if archived is None else archived.as_posix(), "fresh": True}

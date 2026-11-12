@@ -10,6 +10,7 @@ pytest.importorskip("sqlalchemy")
 from sqlalchemy import LargeBinary  # noqa: E402
 
 from src.config import load_params  # noqa: E402
+from src.db import migrate  # noqa: E402
 from src.db.models import Feedback  # noqa: E402
 from src.db.store import PredictionLog  # noqa: E402
 from src.review import queue as rq  # noqa: E402
@@ -24,7 +25,7 @@ CLASSES = rh.CLASSES
 @pytest.fixture
 def db(tmp_path):
     log = PredictionLog("sqlite:///" + (tmp_path / "db" / "p.db").as_posix())
-    log.create_tables()
+    migrate.upgrade(log.engine)
     yield log
     log.dispose()
 

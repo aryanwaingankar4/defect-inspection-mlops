@@ -24,7 +24,7 @@ MANIFEST := models/serving/manifest.json
 SMOKE_AUDIT_SALT := smoke-test-audit-salt-not-secret
 
 .PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
-	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke monitoring-smoke review-ui stream simulate-review db-reset feedback-export gate retrain challenger-serving rollback challenger loop-chunks loop-record fault-export loop-final loop-summary register kaggle-dataset kaggle-push kaggle-status kaggle-output
+	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke docker-smoke-postgres monitoring-smoke db-migrate pg-up pg-down test-db-postgres review-ui stream simulate-review db-reset feedback-export gate retrain challenger-serving rollback challenger loop-chunks loop-record fault-export loop-final loop-summary register kaggle-dataset kaggle-push kaggle-status kaggle-output
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -128,6 +128,9 @@ docker-down: ## Stop the Docker stack (volumes are kept)
 docker-smoke: docker-build ## Build, start and check the API container, then remove it (synthetic image only)
 	AUDIT_SALT=$(SMOKE_AUDIT_SALT) $(RUN) python scripts/docker_smoke.py
 
+docker-smoke-postgres: docker-build ## The same smoke with the API on the compose test Postgres (ADR-038)
+	AUDIT_SALT=$(SMOKE_AUDIT_SALT) $(RUN) python scripts/docker_smoke.py --postgres
+
 monitoring-smoke: docker-build ## API + Prometheus + Grafana: metrics scraped, dashboard provisioned (TASK-032)
 	AUDIT_SALT=$(SMOKE_AUDIT_SALT) $(RUN) python scripts/monitoring_smoke.py
 
@@ -144,6 +147,23 @@ stream: ## SIMULATED stream: send N production_stream images to the API on :8000
 
 simulate-review: ## SIMULATED reviewer labels production_stream images in the local queue. ARGS: --limit, --error-rate, --out F
 	$(RUN_SERVE) $(ENV_FILE) python -m src.review.simulated --config $(PARAMS) $(ARGS)
+
+db-migrate: ## Upgrade the DATABASE_URL schema to the Alembic head; adopts a pre-Alembic SQLite log (ADR-038)
+	$(RUN_SERVE) $(ENV_FILE) python -m src.db.migrate upgrade
+
+# Local TEST Postgres only (ADR-038): fixed, non-secret password, bound to 127.0.0.1. Never a real database.
+PG_TEST_URL := postgresql+psycopg://defect:defect-local-test@127.0.0.1:5433/defect
+
+pg-up: ## Start the local TEST Postgres (compose profile postgres, 127.0.0.1:5433; ADR-038)
+	docker compose --profile postgres up -d --wait postgres
+
+pg-down: ## Stop and remove the local TEST Postgres and its volume
+	docker compose --profile postgres rm -s -f -v postgres
+	-docker volume rm defect-inspection_postgres
+
+test-db-postgres: ## make db-migrate + the DB/migration tests against the local TEST Postgres (after pg-up)
+	$(MAKE) db-migrate DATABASE_URL=$(PG_TEST_URL) ENV_FILE=
+	TEST_DATABASE_URL=$(PG_TEST_URL) $(RUN_SERVE) pytest tests/test_db.py tests/test_migrations.py
 
 db-reset: ## Move the local SQLite log to data/archive/ and start an empty one (stop serve/review-ui first; ADR-032)
 	$(RUN_SERVE) $(ENV_FILE) python -m src.db.reset --config $(PARAMS)

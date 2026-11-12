@@ -3,16 +3,40 @@
 # `make docker-up`. API_KEY, AUDIT_SALT and GRAFANA_ADMIN_PASSWORD are read from the shell or .env for
 # interpolation only; no env_file, so other .env values (DagsHub credentials) never reach a container.
 # Every port is bound to 127.0.0.1 (local only).
+# Schema (ADR-038): the one-shot `migrate` service upgrades the log to the Alembic head and exits;
+# the API starts only after it succeeded and itself never migrates. API_DATABASE_URL (default: the
+# SQLite volume) switches both to another database, e.g. the `postgres` profile for local tests.
 name: defect-inspection
 
 services:
+  migrate:
+    image: defect-inspection-api:local
+    command: ["python", "-m", "src.db.migrate", "upgrade"]
+    environment:
+      DATABASE_URL: ${API_DATABASE_URL:-sqlite:////data/predictions.db}
+    volumes:
+      - predictions:/data
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false                     # only with --profile postgres
+    restart: "no"
+
   api:
     image: defect-inspection-api:local      # built by `make docker-build` (with model labels)
     build: .
     environment:
       API_KEY: ${API_KEY:?set API_KEY in .env or the shell}
       AUDIT_SALT: ${AUDIT_SALT:?set AUDIT_SALT in .env or the shell}
-      DATABASE_URL: sqlite:////data/predictions.db
+      DATABASE_URL: ${API_DATABASE_URL:-sqlite:////data/predictions.db}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     volumes:
       - predictions:/data
     ports:
@@ -70,7 +94,30 @@ services:
       - prometheus
     restart: unless-stopped
 
+  # LOCAL TESTS ONLY (ADR-038): `make pg-up`, `make docker-smoke-postgres`. The password is fixed and
+  # NOT a secret; this database is never deployed or reachable from outside 127.0.0.1.
+  postgres:
+    image: postgres:16.14@sha256:95206741a5b214807675e14165369d05b93a9cf692223b616d07cca227e74b0b
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: defect
+      POSTGRES_DB: defect
+      POSTGRES_PASSWORD: defect-local-test
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U defect -d defect"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
 volumes:
   predictions:
   prometheus:
   grafana:
+  postgres:

@@ -22,6 +22,7 @@ from src.serving import bundle as bd  # noqa: E402
 from src.serving import routing  # noqa: E402
 from src.tracking import serving_bundle as sb  # noqa: E402
 from tests import serving_helpers as sh  # noqa: E402
+from tests.db_helpers import migrated  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PARAMS = load_params(REPO_ROOT / "configs" / "params.yaml")
@@ -33,6 +34,7 @@ ALIAS = PARAMS["promotion"]["champion_alias"]
 def database_url(tmp_path, monkeypatch):
     """A fresh SQLite prediction log per test (ADR-029); tests never read .env."""
     url = "sqlite:///" + (tmp_path / "db" / "predictions.db").as_posix()
+    url = migrated(url)  # what `make db-migrate` does (ADR-038)
     monkeypatch.setenv("DATABASE_URL", url)
     return url
 

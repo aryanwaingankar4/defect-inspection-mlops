@@ -1,4 +1,5 @@
-"""TASK-019: the database layer (ADR-003, ADR-014, ADR-029), on SQLite in a temp folder."""
+"""TASK-019: the database layer (ADR-003, ADR-014, ADR-029). A temporary SQLite file, or the local
+TEST Postgres with ``TEST_DATABASE_URL`` (ADR-038). Schema changes: tests/test_migrations.py."""
 
 from datetime import UTC, datetime
 
@@ -11,6 +12,7 @@ from sqlalchemy.exc import IntegrityError  # noqa: E402
 
 from src.db import store  # noqa: E402
 from src.db.models import Prediction  # noqa: E402
+from tests.db_helpers import empty_test_database, migrated  # noqa: E402
 
 EXPECTED_COLUMNS = {
     "id",
@@ -71,8 +73,8 @@ def row(request_id: str = "a" * 32, **changes) -> dict:
 
 @pytest.fixture
 def db(tmp_path):
-    log = store.PredictionLog("sqlite:///" + (tmp_path / "new" / "dir" / "p.db").as_posix())
-    log.create_tables()
+    log = store.PredictionLog(migrated(empty_test_database(tmp_path / "new" / "dir")))
+    log.require_head()
     yield log
     log.dispose()
 
@@ -86,7 +88,8 @@ def test_schema_is_exactly_the_adr_029_columns_and_holds_no_bytes():
 
 def test_round_trip_and_folder_creation(db):
     db.add(row())
-    assert sorted(db.table_names()) == ["feedback", "predictions"] and db.count() == 1
+    assert sorted(db.table_names()) == ["alembic_version", "feedback", "predictions"]
+    assert db.count() == 1
     got = db.recent(1)[0]
     expected = row()
     for key, value in expected.items():
@@ -107,10 +110,10 @@ def test_recent_is_newest_first(db):
     assert [r["request_id"] for r in db.recent(2)] == [f"{2:032d}", f"{1:032d}"]
 
 
-def test_create_tables_is_idempotent(db):
+def test_migrating_again_changes_nothing(db):
     db.add(row())
-    db.create_tables()
-    assert db.count() == 1
+    migrated(db.engine.url.render_as_string(hide_password=False))
+    assert db.count() == 1 and db.require_head() == "0001"
 
 
 def test_ping(db, tmp_path):
@@ -142,55 +145,7 @@ def test_review_queue_size_counts_routed_rows(db):
     assert db.review_queue_size() == 2
 
 
-OLD_TABLE = """CREATE TABLE predictions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, request_id VARCHAR(32) NOT NULL UNIQUE,
-    created_at DATETIME, image_sha256 VARCHAR(64), prediction VARCHAR(64),
-    calibrated_confidence FLOAT, energy FLOAT, routed_to_review BOOLEAN,
-    reason_low_confidence BOOLEAN, reason_ood BOOLEAN, model_name VARCHAR(128),
-    model_version VARCHAR(32), model_precision VARCHAR(8), latency_ms FLOAT, inference_ms FLOAT,
-    image_bytes INTEGER, image_width INTEGER, image_height INTEGER, image_format VARCHAR(16),
-    brightness FLOAT, contrast FLOAT, sharpness FLOAT, logits JSON)"""
-
-
-def test_an_older_log_gets_reason_audit_false(tmp_path):
-    """A TASK-019 database: the new column is added and earlier rows were never audited."""
-    from sqlalchemy import text
-
-    url = "sqlite:///" + (tmp_path / "old.db").as_posix()
-    old = store.PredictionLog(url)
-    with old.engine.begin() as conn:
-        conn.execute(text(OLD_TABLE))
-        conn.execute(
-            text(
-                "INSERT INTO predictions (request_id, prediction, routed_to_review) "
-                "VALUES ('" + "o" * 32 + "', 'crazing', 1)"
-            )
-        )
-    old.dispose()
-    log = store.PredictionLog(url)
-    log.create_tables()
-    got = log.recent(1)[0]
-    assert got["request_id"] == "o" * 32 and got["reason_audit"] is False
-    log.add(row("n" * 32, routed_to_review=True, reason_audit=True))
-    assert log.recent(1)[0]["reason_audit"] is True
-    assert log.upgrade_schema() == []  # nothing left to add
-    log.dispose()
-
-
-def test_unknown_or_undefaulted_schema_changes_stop(tmp_path):
-    from sqlalchemy import text
-
-    url = "sqlite:///" + (tmp_path / "odd.db").as_posix()
-    odd = store.PredictionLog(url)
-    with odd.engine.begin() as conn:
-        conn.execute(text(OLD_TABLE.replace("logits JSON)", "logits JSON, extra TEXT)")))
-    with pytest.raises(store.SchemaError, match="does not know"):
-        odd.create_tables()
-    odd.dispose()
-    url2 = "sqlite:///" + (tmp_path / "missing.db").as_posix()
-    missing = store.PredictionLog(url2)
-    with missing.engine.begin() as conn:
-        conn.execute(text(OLD_TABLE.replace(", logits JSON)", ")")))
-    with pytest.raises(store.SchemaError, match="no default"):
-        missing.create_tables()
-    missing.dispose()
+def test_postgresql_urls_use_psycopg():
+    engine = store.make_engine("postgresql://u:p@db.example:5432/x")
+    assert engine.url.drivername == "postgresql+psycopg"
+    engine.dispose()

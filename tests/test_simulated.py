@@ -11,6 +11,7 @@ import pytest
 pytest.importorskip("sqlalchemy")
 
 from src.config import load_params  # noqa: E402
+from src.db import migrate  # noqa: E402
 from src.db.store import PredictionLog  # noqa: E402
 from src.pipelines import stream as st  # noqa: E402
 from src.review import simulated as sim  # noqa: E402
@@ -25,7 +26,7 @@ CLASSES = rh.CLASSES
 @pytest.fixture
 def db(tmp_path):
     log = PredictionLog("sqlite:///" + (tmp_path / "db" / "p.db").as_posix())
-    log.create_tables()
+    migrate.upgrade(log.engine)
     yield log
     log.dispose()
 
@@ -120,7 +121,7 @@ def test_run_respects_the_limit_and_is_order_independent(tmp_path, archive):
     results = []
     for name, order in (("a", range(1, 41)), ("b", range(40, 0, -1))):
         log = PredictionLog("sqlite:///" + (tmp_path / f"{name}.db").as_posix())
-        log.create_tables()
+        migrate.upgrade(log.engine)
         for i in order:
             log.add(rh.prediction(rid(i), shas["crazing_0"], reasons=("low_confidence",)))
         sim.run(log, arc, CLASSES, cfg)
@@ -128,7 +129,7 @@ def test_run_respects_the_limit_and_is_order_independent(tmp_path, archive):
         log.dispose()
     assert results[0] == results[1]  # same labels, whatever the order
     log = PredictionLog("sqlite:///" + (tmp_path / "c.db").as_posix())
-    log.create_tables()
+    migrate.upgrade(log.engine)
     for i in range(1, 11):
         log.add(rh.prediction(rid(i), shas["crazing_0"], reasons=("ood",)))
     out = sim.run(log, arc, CLASSES, sim.SimConfig(0.0, 31, "sim", limit=3))

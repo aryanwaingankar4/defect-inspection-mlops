@@ -124,7 +124,7 @@ def main(argv: list[str] | None = None) -> None:
     cfg = SimConfig.from_params(params, limit=args.limit, error_rate=args.error_rate)
     archive = ImageArchive.from_split_file(params["data"]["split_file"], params["data"]["raw_dir"])
     db = PredictionLog(database_url_from_env())
-    db.create_tables()
+    db.require_head()  # never migrates (ADR-038)
     try:
         summary = run(db, archive, class_names(params), cfg)
     finally:

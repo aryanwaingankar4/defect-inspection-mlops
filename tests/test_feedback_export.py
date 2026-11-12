@@ -14,6 +14,7 @@ pytest.importorskip("sqlalchemy")
 from sqlalchemy import event  # noqa: E402
 
 from src.config import load_params  # noqa: E402
+from src.db import migrate  # noqa: E402
 from src.db.store import PredictionLog  # noqa: E402
 from src.review import export as ex  # noqa: E402
 from src.review.archive import ImageArchive  # noqa: E402
@@ -38,7 +39,7 @@ ITEMS = [
 def env(tmp_path):
     split, raw, shas = rh.make_archive(tmp_path / "archive", ITEMS)
     db = PredictionLog("sqlite:///" + (tmp_path / "db" / "p.db").as_posix())
-    db.create_tables()
+    migrate.upgrade(db.engine)
     yield db, ImageArchive.from_split_file(split, raw), raw, shas, tmp_path
     db.dispose()
 
@@ -129,7 +130,7 @@ def test_excludes_hashes_shared_by_two_classes(tmp_path):
         ],
     )
     db = PredictionLog("sqlite:///" + (tmp_path / "p.db").as_posix())
-    db.create_tables()
+    migrate.upgrade(db.engine)
     label(db, 1, shas["crazing_0"], "crazing")
     archive = ImageArchive.from_split_file(split, raw)
     assert sha_ambiguous(archive, shas["crazing_0"])

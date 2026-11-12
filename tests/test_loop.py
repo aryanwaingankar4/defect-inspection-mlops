@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from src.config import load_params
+from src.db import migrate
 from src.pipelines import loop as lp
 from src.pipelines import stream as st
 from tests import review_helpers as rh
@@ -484,7 +485,7 @@ def test_loop_counts(tmp_path):
     from src.review.queue import submit
 
     db = PredictionLog("sqlite:///" + (tmp_path / "p.db").as_posix())
-    db.create_tables()
+    migrate.upgrade(db.engine)
     try:
         db.add(rh.prediction(f"{1:032x}", reasons=("low_confidence",), model_version="3"))
         db.add(rh.prediction(f"{2:032x}", model_version="3"))

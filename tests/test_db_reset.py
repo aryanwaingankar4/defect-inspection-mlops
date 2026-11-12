@@ -7,6 +7,7 @@ import pytest
 
 pytest.importorskip("sqlalchemy")
 
+from src.db import migrate  # noqa: E402
 from src.db import reset as rs  # noqa: E402
 from src.db.store import PredictionLog  # noqa: E402
 from tests import review_helpers as rh  # noqa: E402
@@ -22,7 +23,7 @@ def url_for(path: Path) -> str:
 def test_reset_archives_the_log_and_side_files_and_starts_empty(tmp_path):
     db_file = tmp_path / "data" / "predictions.db"
     log = PredictionLog(url_for(db_file))
-    log.create_tables()
+    migrate.upgrade(log.engine)
     log.add(rh.prediction("a" * 32, reasons=("audit",)))
     log.dispose()
     (tmp_path / "data" / "predictions.db-wal").write_bytes(b"wal")

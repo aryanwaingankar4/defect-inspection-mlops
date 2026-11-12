@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from src.config import load_params
-from src.db.store import PredictionLog, database_url_from_env
+from src.db.store import PredictionLog, SchemaError, database_url_from_env
 from src.review.archive import PRODUCTION_SPLIT, TEST_SPLIT, ImageArchive
 from src.review.queue import KINDS, UNKNOWN, class_names
 
@@ -153,8 +153,10 @@ def export(
     """Write ``<out_dir>/feedback.csv`` and the JSON report; returns the report."""
     if len(archive) == 0:
         raise ExportError(f"no archive images under {raw_dir}: run `make pull` first")
-    if "feedback" not in db.table_names():
-        raise ExportError("the prediction log has no feedback table (wrong DATABASE_URL?)")
+    try:
+        db.require_head()  # never migrates (ADR-038)
+    except SchemaError as exc:
+        raise ExportError(f"{exc} (wrong DATABASE_URL?)") from exc
     labelled = db.labelled_images()
     rows, excluded = select_rows(labelled, archive, raw_dir, classes)
     csv_path = Path(out_dir) / CSV_NAME

@@ -1,0 +1,12 @@
+{
+  "reviewer": "simulated (ADR-031)",
+  "error_rate": 0.0,
+  "seed": 31,
+  "queue_before": 28,
+  "labelled": 28,
+  "flipped": 0,
+  "skipped_test_frozen": 0,
+  "skipped_no_ground_truth": 0,
+  "skipped_not_production_stream": 0,
+  "queue_left": 0
+}

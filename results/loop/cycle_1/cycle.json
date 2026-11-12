@@ -1,0 +1,76 @@
+{
+  "decision_record": "ADR-036",
+  "cycle": "1",
+  "fault_injection": false,
+  "note": "SIMULATED stream and SIMULATED reviewer (ADR-031); real Kaggle GPU training",
+  "chunk": "all 1,110 production_stream images (pilot)",
+  "stream": {
+    "stream": "simulated, production_stream (ADR-031)",
+    "chunk": "all 1,110 production_stream images (pilot)",
+    "sent": 1110,
+    "routed_to_review": 67,
+    "source": "prediction log (loop_counts), read before cycle 2"
+  },
+  "review": {
+    "reviewer": "simulated (ADR-031)",
+    "error_rate": 0.0,
+    "labelled": 67,
+    "flipped": 0,
+    "source": "prediction log (loop_counts), read before cycle 2"
+  },
+  "reviewer_error": {
+    "kind": "simulated",
+    "error_rate": 0.0,
+    "flipped": 0
+  },
+  "new_labels": 67,
+  "feedback_rows_used": 67,
+  "feedback_md5": "2104573eeacc32caeed4dcef91897d2c",
+  "export_report": "results/loop/cycle_1/export_report.json",
+  "calibration": {
+    "source": "fitted",
+    "temperature": 1.5115263565117054,
+    "file": "results/retrain/e7f25858ed574f3db2e2f37c4168cadb/calibration.json"
+  },
+  "kaggle_wall_time_s": 305,
+  "kaggle_training_time_s": 40,
+  "retrain_record": "results/retrain/cycle_e7f25858ed574f3db2e2f37c4168cadb.json",
+  "champion_version": "2",
+  "challenger_version": "3",
+  "val_macro_f1": {
+    "champion": 0.9779568398629248,
+    "challenger": 0.9944429008057795
+  },
+  "decision": "promote",
+  "failed_checks": [],
+  "checks": {
+    "macro_f1": "macro-F1 drop -0.0165 within 0.01",
+    "class_recall": "largest recall drop +0.0333 (crazing) within 0.05",
+    "mcnemar": "not significantly worse: p = 0.375, 1 champion-only vs 4 challenger-only correct",
+    "onnx_parity": "parity passed: max tolerance ratio 0.476 (<= 1 passes), same class 180/180, same routing 180/180, batch sizes ok"
+  },
+  "applied": false,
+  "gate_file": "results/promotion/gate_3.json",
+  "gate_record_file": "results/promotion/gate_3.json",
+  "applied_in": "results/promotion/gate_3.2.json",
+  "prediction_log_counts": {
+    "predictions": {
+      "2": {
+        "n": 1110,
+        "routed_to_review": 67
+      },
+      "3": {
+        "n": 520,
+        "routed_to_review": 28
+      }
+    },
+    "labels": [
+      {
+        "reviewer_kind": "simulated",
+        "simulated_error_rate": 0.0,
+        "n": 95,
+        "simulated_flipped": 0
+      }
+    ]
+  }
+}

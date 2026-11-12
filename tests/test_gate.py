@@ -389,3 +389,14 @@ def test_apply_does_not_log_a_second_onnx_file(registry, monkeypatch):
     out = gt.run(registry["params"], registry["ckpt"]["2"], registry["ckpt"]["1"], do_apply=True)
     assert calls == [False] and out["record"]["decision"] == "promote"
     assert aliases(registry) == {"champion": "2"}
+
+
+def test_apply_refuses_a_fault_injection_challenger(registry, monkeypatch):
+    """ADR-036: a model trained on broken labels is gated in record mode only."""
+    registry["client"].set_model_version_tag(registry["name"], "2", "fault_injection", "true")
+    with pytest.raises(gt.GateError, match="FAULT-INJECTION"):
+        gt.run(registry["params"], registry["ckpt"]["2"], registry["ckpt"]["1"], do_apply=True)
+    assert aliases(registry) == {"champion": "1", "challenger": "2"}
+    assert not Path(registry["params"]["promotion"]["gate"]["out_dir"]).exists()
+    out = run_gate(registry, monkeypatch, Y.copy(), apply=False, record=True)
+    assert out["record"]["applied"] is False and out["gate_file"].is_file()

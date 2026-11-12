@@ -1,0 +1,101 @@
+{
+  "decision_record": "ADR-036",
+  "cycle": "3",
+  "fault_injection": false,
+  "note": "SIMULATED stream and SIMULATED reviewer (ADR-031); real Kaggle GPU training",
+  "chunk": "cycle3",
+  "stream": {
+    "stream": "simulated, production_stream (ADR-031)",
+    "start": null,
+    "chunk": "cycle3",
+    "sent": 523,
+    "statuses": {
+      "200": 523
+    },
+    "routed_to_review": 26,
+    "accepted_or_reasons": {
+      "accepted": 497,
+      "audit": 8,
+      "low_confidence": 17,
+      "ood": 4
+    },
+    "note": "not brand-new traffic: v2 predicted these images in the pilot (ADR-036)"
+  },
+  "review": {
+    "reviewer": "simulated (ADR-031)",
+    "error_rate": 0.05,
+    "seed": 31,
+    "queue_before": 26,
+    "labelled": 26,
+    "flipped": 2,
+    "skipped_test_frozen": 0,
+    "skipped_no_ground_truth": 0,
+    "skipped_not_production_stream": 0,
+    "queue_left": 0
+  },
+  "reviewer_error": {
+    "kind": "simulated",
+    "error_rate": 0.05,
+    "flipped": 2
+  },
+  "new_labels": 26,
+  "feedback_rows_used": 121,
+  "feedback_md5": "7d983acda5b2e7a28c33c2c875e33b58",
+  "export_report": "results/loop/cycle_3/export_report.json",
+  "calibration": {
+    "source": "fitted",
+    "temperature": 1.3705637851028614,
+    "file": "results/retrain/9b1c9dbd6d464eb291ba2605b3f35de6/calibration.json"
+  },
+  "kaggle_wall_time_s": 242,
+  "kaggle_training_time_s": 42,
+  "retrain_record": "results/retrain/cycle_9b1c9dbd6d464eb291ba2605b3f35de6.json",
+  "champion_version": "4",
+  "challenger_version": "5",
+  "val_macro_f1": {
+    "champion": 1.0,
+    "challenger": 0.9944429008057795
+  },
+  "decision": "promote",
+  "failed_checks": [],
+  "checks": {
+    "macro_f1": "macro-F1 drop +0.0056 within 0.01",
+    "class_recall": "largest recall drop +0.0333 (scratches) within 0.05",
+    "mcnemar": "not significantly worse: p = 1, 1 champion-only vs 0 challenger-only correct",
+    "onnx_parity": "parity passed: max tolerance ratio 0.681 (<= 1 passes), same class 180/180, same routing 180/180, batch sizes ok"
+  },
+  "applied": true,
+  "gate_file": "results/promotion/gate_5.2.json",
+  "gate_record_file": "results/promotion/gate_5.json",
+  "applied_in": "results/promotion/gate_5.2.json",
+  "prediction_log_counts": {
+    "predictions": {
+      "2": {
+        "n": 1110,
+        "routed_to_review": 67
+      },
+      "3": {
+        "n": 520,
+        "routed_to_review": 28
+      },
+      "4": {
+        "n": 523,
+        "routed_to_review": 26
+      }
+    },
+    "labels": [
+      {
+        "reviewer_kind": "simulated",
+        "simulated_error_rate": 0.0,
+        "n": 95,
+        "simulated_flipped": 0
+      },
+      {
+        "reviewer_kind": "simulated",
+        "simulated_error_rate": 0.05,
+        "n": 26,
+        "simulated_flipped": 2
+      }
+    ]
+  }
+}

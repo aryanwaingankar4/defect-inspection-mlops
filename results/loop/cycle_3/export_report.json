@@ -1,0 +1,32 @@
+{
+  "note": "SIMULATED stream and reviewer (ADR-031/032); human labels are real labels on simulated traffic",
+  "split": "production_stream",
+  "split_file": "data/splits/neu_split_v2.csv",
+  "label_rows_read": 121,
+  "rows": 121,
+  "per_class": {
+    "crazing": 21,
+    "inclusion": 40,
+    "patches": 16,
+    "pitted_surface": 17,
+    "rolled-in_scale": 7,
+    "scratches": 20
+  },
+  "per_reviewer_kind": {
+    "human": 0,
+    "simulated": 121
+  },
+  "excluded": {
+    "test_frozen": 0,
+    "val": 0,
+    "other_split": 0,
+    "not_in_archive": 0,
+    "unknown_label": 0,
+    "invalid_label": 0,
+    "conflicting_labels": 0,
+    "repeated_image": 0
+  },
+  "csv": "data/feedback/feedback.csv",
+  "csv_md5": "7d983acda5b2e7a28c33c2c875e33b58",
+  "exported_at": "2026-11-12T11:23:19Z"
+}

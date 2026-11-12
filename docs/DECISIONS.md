@@ -384,3 +384,59 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
   - **Golden outputs after a promotion:** `make golden ARGS="--val-predictions <results dir>/val_predictions.csv"` regenerates `tests/golden/expected.json` for the new champion. It refuses a predictions file whose `calibration.json` belongs to another checkpoint than the bundle's. `make docker-smoke` then checks the image against the new champion.
 - **Reason:** A rollback is only safe if the target can actually be served and reproduced. Checking the same tags the serving bundle needs, plus the kept checkpoint, before moving the alias means a rollback can never leave `@champion` on a version that `make serving-bundle` would reject. Immutable decision files keep every promotion, rejection and rollback auditable.
 - **Consequences:** Every challenger now costs one ONNX export and one OOD pass on CPU (minutes) before it can be promoted. A promoted challenger's OOD threshold comes from `val` like the champion's, with the same small-sample limits (ADR-027). The committed golden file follows the champion, so it changes with every promotion; the diff is reviewed in the PR.
+
+## ADR-036 — Loop cycles: pilot plus disjoint stream chunks, 0% and 5% reviewer error, one fault-injection run, one report-only test
+- **Context:** TASK-030. Cycle 1 (ADR-034) streamed all 1,110 `production_stream` images through v2; the simulated reviewer labelled the 67 that were routed, and v3 was trained on them and promoted (ADR-035 demo). No unused stream images are left, so later cycles cannot get brand-new traffic. The loop must also show that the gate (ADR-033) rejects a challenger trained on bad labels.
+- **Decision (owner decisions of 2026-11-12, written and committed before the code):**
+  - **Cycle 1 is the pilot** and is not re-run. It keeps its files (`results/retrain/cycle_e7f2….json`, `results/promotion/gate_3.json`).
+  - **Disjoint chunks** (`make loop-chunks` → committed `data/splits/loop_chunks.csv`, paths only): every `production_stream` image in the seeded stream order (`review.stream.seed`). The 67 images labelled in the pilot are `pilot`; they are read from the pilot export, whose MD5 must match the cycle-1 record. The remaining 1,043, in stream order, are cut into `cycle2` (first 520) and `cycle3` (next 523); the sizes are in `loop.chunks`. **These are not brand-new traffic:** v2 already predicted every one of them in the pilot. None of them was labelled or trained on. Every write-up says so.
+  - **Cycles 2 and 3 run the real flow:**
+    1. rebuild the serving bundle for the current `@champion` and restart `make serve`, so the current champion routes the chunk;
+    2. `make stream ARGS="--chunk cycleN --out …"` sends exactly that chunk (the pilot chunk is refused);
+    3. `make simulate-review` labels the whole queue, which holds only this chunk's routed images. Cycle 2 uses error rate 0.0 and cycle 3 uses 0.05. The rate applies to the new labels only; the earlier labels stay as they are;
+    4. `make feedback-export` writes all feedback so far (pilot plus chunks), commit;
+    5. `make retrain ARGS=--fresh` trains from the base checkpoint on `train_v1` plus all feedback (gate in record mode);
+    6. `make gate ARGS="--challenger-checkpoint … --apply"`.
+  - A rejected challenger is reported as rejected. No threshold, seed, label or parameter is changed to make one pass.
+  - **Fault injection, clearly labelled** (one run, after cycle 3):
+    - A *broken reviewer* (`make fault-export`) moves **every** label of the latest real export (pilot plus both chunks) to the next class in sorted class order (cyclic). This is the kind of bug a reordered button row would cause.
+    - It works on a copy: `data/feedback_fault/feedback.csv` (git-ignored, not DVC-tracked) and `results/loop/fault_injection/export_report.json` (source MD5, rule, counts).
+    - `make retrain ARGS="--fresh --fault-injection"` runs the same flow. It uses its own state folder and its own private Kaggle dataset (`neu-feedback-fault-private`). It tags the version `fault_injection=true` and runs the gate in record mode only.
+    - The gate refuses `--apply` for any version tagged `fault_injection=true`. When the run ends, `@challenger` goes back to its previous holder (or is removed).
+    - The shifted labels never enter the real feedback history: the prediction log, the `data/feedback` DVC versions and `neu-feedback-private`.
+    - The expected verdict is REJECT. The verdict and the failed checks are reported whatever they are; a pass would be a finding about the gate.
+  - **Loop records:** the stream and reviewer summaries of each cycle go to `results/loop/cycle_<n>/`. The reviewer summary may count `simulated_flipped` for reporting; the export still never reads it (ADR-032). `make loop-record` then adds a copy of that cycle's export report and `cycle.json` (pointers to the retrain record and the gate files). For the pilot, these facts are read from the prediction log before cycle 2 starts.
+  - **Final test, report only** (`make loop-final`, once, after the last gate): on `test_frozen`, the original v2 (the `initial_champion` log entry) against the final `@champion`. It reports macro-F1 with the grouped cluster bootstrap interval of ADR-022 (`evaluate.bootstrap`), the paired difference on the same resamples, per-class recall and error counts. It goes to `results/loop/final_test_frozen.json`. It writes nothing to the registry, and no decision, threshold or later cycle may use it.
+  - **Summary:** `make loop-summary` builds `results/loop/loop_summary.json` and the table in `results/loop/README.md` (cycle, labels, reviewer error, val macro-F1 champion vs challenger, verdict, gate file) from those files only. A test checks that the table matches the JSON.
+  - The final `@champion` gets a rebuilt serving bundle, golden outputs and a passing `make docker-smoke`.
+- **Reason:** Reusing the pilot's unlabelled images is the only honest way to run more cycles on NEU, and saying so keeps the claim honest. Disjoint chunks make sure that no image is labelled twice and that each cycle's new labels are known. A fault-injection run checks the gate itself: a gate that never rejects proves nothing.
+- **Consequences:**
+  - Each cycle adds only about as many labels as its chunk routes (about 6% in the pilot). Val has 180 images, so differences between cycles are mostly within noise; the summary says so.
+  - The fault-injection model is registered and kept like any version, but it can never be promoted.
+  - Three Kaggle runs: cycle 2, cycle 3 and the fault run.
+- **Amendment (2026-11-12, after the fault run):** the fault-injection model (v6) never reached the gate. The challenger's review threshold (ADR-023) refused it, because the risk upper bound among accepted val images was above `threshold.max_risk_ucb`, so it never got the tags the gate needs. For a fault-injection run only, such a refusal is now **recorded as the run's outcome**:
+  - the retrain cycle record says `stopped before the gate` and gives the check and its message;
+  - the challenger, serving and gate steps are skipped; the checkpoint is still kept (`versions`);
+  - `@challenger` is never moved.
+  - The loop table shows this outcome as it is. The gate's own checks are not evaluated, and nothing is relaxed so that the gate could run.
+  - In a real cycle the same refusal still stops the flow for an owner decision.
+
+## ADR-037 — Retrain calibration: inherit the champion's T when the val fit hits its bound
+- **Context:** **This rule was added after cycle 2 of TASK-030 exposed a gap.** ADR-006 says a temperature fit on a range bound writes nothing and stops. The cycle-2 challenger (v4) classified all 180 val images correctly. With no errors, mean NLL keeps falling as T → 0, so the fit always lands on `calibrate.t_min`. `make retrain` stopped at `calibrate`, and the challenger could never reach the gate. The gate (ADR-033) does not use T, but a promoted version must be servable, which needs T, the review threshold and the OOD threshold. So any challenger with a perfect val score, and more generally any challenger whose fit hits a bound, was locked out.
+- **Decision (owner decision of 2026-11-12, written and committed before the code):**
+  - **General rule for every retrain** (`make retrain`, including the fault-injection run of ADR-036), not a v4 special case. If the challenger's val fit sits on either bound of `[t_min, t_max]`, the challenger **inherits the current champion's validated T**: the `temperature` tag of the `@champion` version recorded at preflight. Otherwise the fitted T is used, as before.
+  - The challenger's `calibration.json` records:
+    - `calibration: inherited_T` (or `fitted`);
+    - the bound fit itself (`fit.temperature`, `fit.at_bound: true`);
+    - where T came from (champion version and T);
+    - the val reports with the inherited T, plus the cross-fitted report.
+  - `at_bound` describes the T in use, so it is `false` for an inherited T.
+  - The version is tagged `calibration=inherited_T` (fitted versions are tagged `calibration=fitted`). The retrain cycle record and the loop summary table show it.
+  - Everything after calibration is unchanged and still computed on the challenger's own val logits with the T in use: the review threshold (ADR-023, including its risk check), the ONNX parity check, the OOD threshold (ADR-027) and the gate.
+  - `make calibrate` outside a retrain keeps the ADR-006 behaviour: a bound fit stops the run.
+- **Reason:** A bound fit says that val cannot determine T for this model. It does not say the model is unusable. The champion's T is the only temperature this system has validated (fitted on val off its bound), and the challenger shares its architecture, training recipe and data (ADR-034). Inheriting it is the least arbitrary choice, and it is recorded rather than hidden. Resetting to T = 1 would replace a validated value with an assumption.
+- **Consequences:**
+  - An inherited T is **not validated for the challenger**. Its confidences may be miscalibrated by an unknown amount, and the val ECE reported with the inherited T rests on zero errors.
+  - The review threshold still routes the least confident 5% of val (ADR-023), so routing stays bounded even if T is off.
+  - A chain of inherited Ts is possible if several champions in a row inherit; each version's tags and `calibration.json` show where its T came from.
+  - v4 resumes from `calibrate` under this rule. Nothing is retrained.

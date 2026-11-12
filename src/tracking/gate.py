@@ -290,6 +290,12 @@ def onnx_parity(
 
 # ---------------------------------------------------------------- registry
 
+FAULT_TAG = "fault_injection"  # ADR-036: a version trained on deliberately broken labels
+
+
+def is_fault_injection(tags: Mapping[str, str]) -> bool:
+    return str(tags.get(FAULT_TAG, "")).lower() == "true"
+
 
 def resolve(params: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     """The ``@champion`` and ``@challenger`` versions; they must differ and carry serving tags."""
@@ -429,6 +435,11 @@ def run(
 
     cfg = GateConfig.from_params(params)
     champ, chall = resolve(params)
+    if do_apply and is_fault_injection(chall["tags"]):
+        raise GateError(
+            f"challenger v{chall['version']} is a FAULT-INJECTION model (fault_injection=true): "
+            "record mode only, never applied (ADR-036)"
+        )
     if champion_checkpoint is None:
         champion_checkpoint = default_champion_checkpoint(params, champ["version"])
     champ_ckpt = verified_checkpoint(champ, Path(champion_checkpoint))

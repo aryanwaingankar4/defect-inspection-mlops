@@ -1,0 +1,153 @@
+{
+  "decision_record": "ADR-033",
+  "gate": "non-inferiority (ADR-033): val has too few images to show a significant gain",
+  "decision": "promote",
+  "failed_checks": [],
+  "time_utc": "2026-11-12T11:31:32+00:00",
+  "registered_model": "steel-defect-classifier",
+  "champion": {
+    "version": "4",
+    "run_id": "53ac9bd001124dd4b591fa81876b9ebd",
+    "checkpoint_sha256": "8e39c37f0b648496b015588b2bfdd77cf0b2da046e96ea552e8d3d4f0fd054da"
+  },
+  "challenger": {
+    "version": "5",
+    "run_id": "d212ba99da20495ca0c0cea69bd19996",
+    "checkpoint_sha256": "659bc5a19d84ca40993505992298fde74c4a44380a8ad2615569d0991fe862ce"
+  },
+  "split": "val",
+  "split_file": "neu_split_v2.csv",
+  "split_sha256": "f38cdd74a1437d512db8012edfd28f534687e17fe01dac1e21d56c747b3062ec",
+  "n_images": 180,
+  "classes": [
+    "crazing",
+    "inclusion",
+    "patches",
+    "pitted_surface",
+    "rolled-in_scale",
+    "scratches"
+  ],
+  "rules": {
+    "split": "val",
+    "max_macro_f1_drop": 0.01,
+    "max_class_recall_drop": 0.05,
+    "mcnemar_alpha": 0.05
+  },
+  "checks": {
+    "macro_f1": {
+      "rule": "challenger macro-F1 >= champion macro-F1 - max_macro_f1_drop",
+      "value": 0.005557099194220538,
+      "limit": 0.01,
+      "passed": true,
+      "reason": "macro-F1 drop +0.0056 within 0.01"
+    },
+    "class_recall": {
+      "rule": "no class recall drops by more than max_class_recall_drop",
+      "value": 0.033333333333333326,
+      "limit": 0.05,
+      "per_class_drop": {
+        "crazing": 0.0,
+        "inclusion": 0.0,
+        "patches": 0.0,
+        "pitted_surface": 0.0,
+        "rolled-in_scale": 0.0,
+        "scratches": 0.033333333333333326
+      },
+      "failed_classes": [],
+      "passed": true,
+      "reason": "largest recall drop +0.0333 (scratches) within 0.05"
+    },
+    "mcnemar": {
+      "rule": "block if exact McNemar p < mcnemar_alpha and champion-only > challenger-only",
+      "value": 1.0,
+      "limit": 0.05,
+      "champion_only_correct": 1,
+      "challenger_only_correct": 0,
+      "passed": true,
+      "reason": "not significantly worse: p = 1, 1 champion-only vs 0 challenger-only correct"
+    },
+    "onnx_parity": {
+      "rule": "challenger FP32 ONNX passes the ADR-025 parity check on the gate split",
+      "value": 0.681122088541865,
+      "limit": 1.0,
+      "passed": true,
+      "reason": "parity passed: max tolerance ratio 0.681 (<= 1 passes), same class 180/180, same routing 180/180, batch sizes ok"
+    }
+  },
+  "champion_metrics": {
+    "accuracy": 1.0,
+    "macro_f1": 1.0,
+    "n_correct": 180,
+    "recall": {
+      "crazing": 1.0,
+      "inclusion": 1.0,
+      "patches": 1.0,
+      "pitted_surface": 1.0,
+      "rolled-in_scale": 1.0,
+      "scratches": 1.0
+    }
+  },
+  "challenger_metrics": {
+    "accuracy": 0.9944444444444445,
+    "macro_f1": 0.9944429008057795,
+    "n_correct": 179,
+    "recall": {
+      "crazing": 1.0,
+      "inclusion": 1.0,
+      "patches": 1.0,
+      "pitted_surface": 1.0,
+      "rolled-in_scale": 1.0,
+      "scratches": 0.9666666666666667
+    }
+  },
+  "table": {
+    "both_right": 179,
+    "only_champion_right": 1,
+    "only_challenger_right": 0,
+    "both_wrong": 0
+  },
+  "onnx_parity": {
+    "n_images": 180,
+    "atol": 0.0001,
+    "rtol": 0.0001,
+    "rule": "|onnx - torch| <= atol + rtol * |torch| for every logit",
+    "max_tolerance_ratio": 0.681122088541865,
+    "max_abs_logit_diff": 0.0001468658447265625,
+    "mean_abs_logit_diff": 2.272042135397593e-05,
+    "same_class": 180,
+    "same_routing": 180,
+    "routed_torch": 9,
+    "max_abs_calibrated_confidence_diff": 3.7845882666642794e-06,
+    "min_distance_to_threshold": 0.006340030479662695,
+    "passed": true,
+    "batch_check": [
+      {
+        "batch": 1,
+        "max_abs_logit_diff": 4.5299530029296875e-05,
+        "max_tolerance_ratio": 0.3053306372661386,
+        "passed": true
+      },
+      {
+        "batch": 7,
+        "max_abs_logit_diff": 9.918212890625e-05,
+        "max_tolerance_ratio": 0.6728737601623381,
+        "passed": true
+      },
+      {
+        "batch": 32,
+        "max_abs_logit_diff": 9.918212890625e-05,
+        "max_tolerance_ratio": 0.681122088541865,
+        "passed": true
+      }
+    ],
+    "val_accuracy_torch": 0.9944444444444445,
+    "val_accuracy_onnx": 0.9944444444444445
+  },
+  "note": "feedback labels come from a SIMULATED reviewer and a SIMULATED stream",
+  "provenance": {
+    "git_commit": "529bf2d636c3c83cc19e8bca712a3f7b16b347f8",
+    "git_dirty": true,
+    "device": "cpu"
+  },
+  "applied": false
+}

@@ -93,5 +93,57 @@
     },
     "gate_file": "results/promotion/gate_3.3.json",
     "gate_file_sha256": "48fe6b8642a839f9e2c4bf2aea7cd4943452699c1eb8906d88837bacfd45b2c8"
+  },
+  {
+    "time_utc": "2026-11-12T11:20:25+00:00",
+    "decision": "promote",
+    "decision_record": "ADR-033",
+    "registered_model": "steel-defect-classifier",
+    "alias": "champion",
+    "version": "4",
+    "previous_version": "3",
+    "challenger_version": "4",
+    "challenger_run_id": "53ac9bd001124dd4b591fa81876b9ebd",
+    "gate": "non-inferiority on val (ADR-033)",
+    "checks": {
+      "macro_f1": true,
+      "class_recall": true,
+      "mcnemar": true,
+      "onnx_parity": true
+    },
+    "reasons": {
+      "macro_f1": "macro-F1 drop -0.0056 within 0.01",
+      "class_recall": "largest recall drop +0.0000 (inclusion) within 0.05",
+      "mcnemar": "not significantly worse: p = 1, 0 champion-only vs 1 challenger-only correct",
+      "onnx_parity": "parity passed: max tolerance ratio 0.356 (<= 1 passes), same class 180/180, same routing 180/180, batch sizes ok"
+    },
+    "gate_file": "results/promotion/gate_4.2.json",
+    "gate_file_sha256": "17f8a47a40da6d5b60956a389eafd7cec69485434311d97f1612fa2a8c436d3a"
+  },
+  {
+    "time_utc": "2026-11-12T11:32:59+00:00",
+    "decision": "promote",
+    "decision_record": "ADR-033",
+    "registered_model": "steel-defect-classifier",
+    "alias": "champion",
+    "version": "5",
+    "previous_version": "4",
+    "challenger_version": "5",
+    "challenger_run_id": "d212ba99da20495ca0c0cea69bd19996",
+    "gate": "non-inferiority on val (ADR-033)",
+    "checks": {
+      "macro_f1": true,
+      "class_recall": true,
+      "mcnemar": true,
+      "onnx_parity": true
+    },
+    "reasons": {
+      "macro_f1": "macro-F1 drop +0.0056 within 0.01",
+      "class_recall": "largest recall drop +0.0333 (scratches) within 0.05",
+      "mcnemar": "not significantly worse: p = 1, 1 champion-only vs 0 challenger-only correct",
+      "onnx_parity": "parity passed: max tolerance ratio 0.681 (<= 1 passes), same class 180/180, same routing 180/180, batch sizes ok"
+    },
+    "gate_file": "results/promotion/gate_5.2.json",
+    "gate_file_sha256": "d4a690304acdfdd19d9cfccf79a4c4ecfc5db44cfd94d5abbc0e0805032de538"
   }
 ]

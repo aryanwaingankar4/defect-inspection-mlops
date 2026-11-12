@@ -308,6 +308,12 @@ def version_by_alias(cfg: TrackingConfig, alias: str) -> dict[str, Any] | None:
     return {"version": str(mv.version), "run_id": mv.run_id, "tags": dict(mv.tags)}
 
 
+def version_tags(cfg: TrackingConfig, version: str) -> dict[str, str]:
+    """Tags of one registered version (by number)."""
+    client = mlflow.MlflowClient(tracking_uri=resolve_tracking_uri(cfg.local_uri))
+    return dict(client.get_model_version(cfg.registered_model, str(version)).tags)
+
+
 def set_version_tags(cfg: TrackingConfig, version: str, tags: Mapping[str, Any]) -> None:
     """Add tags to one registered version (text only)."""
     client = mlflow.MlflowClient(tracking_uri=resolve_tracking_uri(cfg.local_uri))
@@ -320,6 +326,15 @@ def move_alias(cfg: TrackingConfig, alias: str, version: str) -> str | None:
     client = mlflow.MlflowClient(tracking_uri=resolve_tracking_uri(cfg.local_uri))
     before = client.get_registered_model(cfg.registered_model).aliases.get(alias)
     client.set_registered_model_alias(cfg.registered_model, alias, version)
+    return None if before is None else str(before)
+
+
+def delete_alias(cfg: TrackingConfig, alias: str) -> str | None:
+    """Remove ``registered_model@alias``; returns the version that held it (None if unset)."""
+    client = mlflow.MlflowClient(tracking_uri=resolve_tracking_uri(cfg.local_uri))
+    before = client.get_registered_model(cfg.registered_model).aliases.get(alias)
+    if before is not None:
+        client.delete_registered_model_alias(cfg.registered_model, alias)
     return None if before is None else str(before)
 
 

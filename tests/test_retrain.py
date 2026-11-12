@@ -479,3 +479,253 @@ def test_ood_needs_the_tagged_onnx_file_for_a_challenger(tmp_path):
         ood.tagged_fp32_onnx({**version, "tags": {"onnx_sha256": "0" * 64}}, f)
     with pytest.raises(ood.OodError, match="needs its ONNX file"):
         ood.run(PARAMS, alias="challenger")
+
+
+# ---------------------------------------------------------------- ADR-036: fault injection
+
+
+def test_fault_params_point_at_the_copy_only():
+    p = rt.fault_params(PARAMS)
+    f = PARAMS["loop"]["fault_injection"]
+    assert p["review"]["export"]["out_dir"] == f["out_dir"]
+    assert p["review"]["export"]["report"] == f["report"]
+    assert p["kaggle"]["feedback_dataset_slug"] == f["feedback_dataset_slug"]
+    assert p["kaggle"]["feedback_staging_dir"] == f["feedback_staging_dir"]
+    assert p["retrain"]["state_dir"] == f["state_dir"]
+    assert PARAMS["review"]["export"]["out_dir"] == "data/feedback"  # the original is untouched
+    assert PARAMS["kaggle"]["feedback_dataset_slug"] == "neu-feedback-private"
+
+
+def test_fault_tags():
+    metrics = {
+        "model": "efficientnet_b0",
+        "checkpoint_sha256": "a" * 64,
+        "feedback": {"md5": MD5, "rows": 7},
+        "run_uid": "u" * 32,
+    }
+    assert rt.challenger_tags(metrics, 1.5, 0.8, fault=True)["fault_injection"] == "true"
+    assert "fault_injection" not in rt.challenger_tags(metrics, 1.5, 0.8)
+    from src.tracking.gate import FAULT_TAG
+
+    assert rt.FAULT_TAG == FAULT_TAG
+
+
+def test_fault_run_uses_its_own_state_and_releases_the_challenger(tmp_path, monkeypatch):
+    p = copy.deepcopy(PARAMS)
+    p["loop"]["fault_injection"]["state_dir"] = str(tmp_path / "fault")
+    p["retrain"]["state_dir"] = str(tmp_path / "real")
+    calls, seen = [], []
+
+    def fake(name):
+        def step(params, state, *api):
+            calls.append(name)
+            seen.append(params["retrain"]["state_dir"])
+            state.finish(name)
+
+        return step
+
+    for name in rt.FAULT_STEPS:
+        monkeypatch.setattr(rt, f"step_{name}", fake(name))
+    monkeypatch.setattr(
+        rt,
+        "step_preflight",
+        lambda params, state, fault: state.finish("preflight", fault_injection=fault),
+    )
+    rt.run(p, fault=True, api_factory=lambda: "api")
+    assert calls == list(rt.FAULT_STEPS[1:]) and calls[-1] == "release"
+    assert set(seen) == {str(tmp_path / "fault")} and not (tmp_path / "real").exists()
+    state = json.loads((tmp_path / "fault" / "state.json").read_text("utf-8"))
+    assert state["fault_injection"] is True
+    with pytest.raises(rt.RetrainError, match="finished"):
+        rt.run(p, fault=True, api_factory=lambda: "api")
+
+
+def test_a_fault_state_is_never_resumed_as_a_real_cycle(tmp_path):
+    p = copy.deepcopy(PARAMS)
+    p["retrain"]["state_dir"] = str(tmp_path)
+    rt.State(tmp_path / "state.json", {"steps": {}, "fault_injection": True}).save()
+    with pytest.raises(rt.RetrainError, match="another kind of run"):
+        rt.run(p, api_factory=lambda: "api")
+
+
+def test_fault_cycle_record_is_labelled(tmp_path):
+    state = rt.State(tmp_path / "s.json")
+    state.data.update(
+        commit="c" * 40, feedback_md5=MD5, feedback_rows=9, feedback_per_class={},
+        kaggle_pushed_at="t0", kaggle_completed_at="t1", kaggle_wall_time_s=1,
+        training_time_s=1, device="cuda", run_uid="u" * 32, n_train=1,
+        champion_version="4", version="6", train_val_macro_f1=0.5, fault_injection=True,
+    )  # fmt: skip
+    gate = {
+        "decision": "reject",
+        "failed_checks": ["macro_f1"],
+        "champion_metrics": {"macro_f1": 0.99},
+        "challenger_metrics": {"macro_f1": 0.5},
+    }
+    rec = rt.cycle_record(state, gate, "g.json")
+    assert rec["fault_injection"] is True and rec["note"].startswith("FAULT INJECTION")
+
+
+def test_release_gives_the_challenger_back(tmp_path, monkeypatch):
+    from src.tracking import mlflow_tracking as mt
+
+    moves = []
+    monkeypatch.setattr(mt, "version_by_alias", lambda cfg, alias: {"version": "6"})
+    monkeypatch.setattr(mt, "move_alias", lambda cfg, alias, v: moves.append(("move", alias, v)))
+    monkeypatch.setattr(mt, "delete_alias", lambda cfg, alias: moves.append(("delete", alias)))
+    state = rt.State(tmp_path / "s.json", {"steps": {}, "version": "6", "previous_challenger": "5"})
+    rt.step_release(PARAMS, state)
+    state = rt.State(
+        tmp_path / "t.json", {"steps": {}, "version": "6", "previous_challenger": None}
+    )
+    rt.step_release(PARAMS, state)
+    assert moves == [("move", "challenger", "5"), ("delete", "challenger")]
+    monkeypatch.setattr(mt, "version_by_alias", lambda cfg, alias: {"version": "7"})
+    with pytest.raises(rt.RetrainError, match="no longer points"):
+        rt.step_release(PARAMS, rt.State(tmp_path / "u.json", {"steps": {}, "version": "6"}))
+
+
+# ---------------------------------------------------------------- ADR-037: inherited T
+
+
+def test_calibration_tag_and_record():
+    metrics = {
+        "model": "efficientnet_b0",
+        "checkpoint_sha256": "a" * 64,
+        "feedback": {"md5": MD5, "rows": 7},
+        "run_uid": "u" * 32,
+    }
+    assert rt.challenger_tags(metrics, 1.5, 0.8)["calibration"] == "fitted"
+    tags = rt.challenger_tags(metrics, 1.5, 0.8, calibration="inherited_T")
+    assert tags["calibration"] == "inherited_T"
+
+
+def test_champion_temperature_comes_from_its_tag(monkeypatch):
+    from src.tracking import mlflow_tracking as mt
+
+    monkeypatch.setattr(mt, "version_tags", lambda cfg, v: {"temperature": "1.5115"})
+    assert rt.champion_temperature(PARAMS, "3") == {"version": "3", "temperature": 1.5115}
+    monkeypatch.setattr(mt, "version_tags", lambda cfg, v: {})
+    with pytest.raises(rt.RetrainError, match="no temperature tag"):
+        rt.champion_temperature(PARAMS, "3")
+
+
+def test_calibrate_step_passes_the_champion_t_and_records_the_source(tmp_path, monkeypatch):
+    from src.training import calibrate as cal
+    from src.training import threshold as th
+
+    results = tmp_path / "r"
+    results.mkdir()
+    (results / "val_metrics.json").write_text(json.dumps({"model": "efficientnet_b0"}), "utf-8")
+    seen = {}
+
+    def fake_calibrate(spec, params, cfg, split, inherit=None):
+        seen["inherit"] = inherit
+        return {
+            "cal": {
+                "temperature": inherit["temperature"],
+                "at_bound": False,
+                "calibration": "inherited_T",
+                "fit": {"temperature": 0.25, "at_bound": True},
+            }
+        }
+
+    monkeypatch.setattr(rt, "champion_temperature", lambda p, v: {"version": v, "temperature": 1.5})
+    monkeypatch.setattr(cal, "calibrate_model", fake_calibrate)
+    monkeypatch.setattr(cal, "write_outputs", lambda result: {})
+    monkeypatch.setattr(cal, "log_to_mlflow", lambda *a: "run")
+    monkeypatch.setattr(th, "run", lambda p, log_mlflow: {"result": {"threshold": 0.9}})
+    state = rt.State(
+        tmp_path / "s.json",
+        {
+            "steps": {},
+            "champion_version": "3",
+            "results_dir": str(results),
+            "challenger_checkpoint": str(tmp_path / "c.pt"),
+        },
+    )
+    rt.step_calibrate(PARAMS, state)
+    assert seen["inherit"] == {"version": "3", "temperature": 1.5}
+    assert state["calibration"] == "inherited_T" and state["temperature"] == 1.5
+    assert state["fitted_temperature"] == 0.25
+
+
+# ---------------------------------------------------------------- ADR-036 amendment: fault stop
+
+
+def _calibrate_with_refused_threshold(tmp_path, monkeypatch, fault):
+    from src.training import calibrate as cal
+    from src.training import threshold as th
+
+    results = tmp_path / "r"
+    results.mkdir(exist_ok=True)
+    (results / "val_metrics.json").write_text(json.dumps({"model": "efficientnet_b0"}), "utf-8")
+    fitted = {"temperature": 1.2, "at_bound": False, "calibration": "fitted"}
+    fitted["fit"] = {"temperature": 1.2, "at_bound": False}
+    monkeypatch.setattr(rt, "champion_temperature", lambda p, v: {"version": v, "temperature": 1.5})
+    monkeypatch.setattr(cal, "calibrate_model", lambda *a, **k: {"cal": fitted})
+    monkeypatch.setattr(cal, "write_outputs", lambda result: {})
+    monkeypatch.setattr(cal, "log_to_mlflow", lambda *a: "run")
+
+    def refuse(p, log_mlflow):
+        raise th.ThresholdError("risk upper bound 0.29 is above max_risk_ucb 0.05")
+
+    monkeypatch.setattr(th, "run", refuse)
+    state = rt.State(
+        tmp_path / "s.json",
+        {
+            "steps": {},
+            "champion_version": "5",
+            "results_dir": str(results),
+            "challenger_checkpoint": str(tmp_path / "c.pt"),
+            "fault_injection": fault,
+        },
+    )
+    rt.step_calibrate(PARAMS, state)
+    return state
+
+
+def test_a_fault_run_refused_by_the_threshold_is_recorded(tmp_path, monkeypatch):
+    state = _calibrate_with_refused_threshold(tmp_path, monkeypatch, fault=True)
+    stop = state[rt.STOPPED]
+    assert stop["check"].startswith("review_threshold_risk") and "0.29" in stop["reason"]
+    assert state["review_threshold"] is None and state.done("calibrate")
+    block = rt.gate_block(state.data, None, None)
+    assert block["decision"] == rt.STOPPED and block["file"] is None
+    assert "not evaluated" in block["mode"]
+
+
+def test_a_real_cycle_refused_by_the_threshold_still_stops(tmp_path, monkeypatch):
+    with pytest.raises(rt.RetrainError, match="ADR-023"):
+        _calibrate_with_refused_threshold(tmp_path, monkeypatch, fault=False)
+
+
+def test_a_stopped_fault_run_skips_the_gate_steps(tmp_path, monkeypatch):
+    p = copy.deepcopy(PARAMS)
+    p["loop"]["fault_injection"]["state_dir"] = str(tmp_path / "fault")
+    calls = []
+
+    def fake(name):
+        def step(params, state, *api):
+            calls.append(name)
+            extra = {rt.STOPPED: {"check": "review_threshold_risk"}} if name == "calibrate" else {}
+            state.finish(name, **extra)
+
+        return step
+
+    for name in rt.FAULT_STEPS:
+        monkeypatch.setattr(rt, f"step_{name}", fake(name))
+    monkeypatch.setattr(
+        rt,
+        "step_preflight",
+        lambda params, state, fault: state.finish("preflight", fault_injection=fault),
+    )
+    rt.run(p, fault=True, api_factory=lambda: "api")
+    assert "challenger" not in calls and "serving" not in calls and "gate" not in calls
+    assert calls[-3:] == ["versions", "record", "release"]
+
+
+def test_release_is_a_no_op_after_a_stop(tmp_path):
+    state = rt.State(tmp_path / "s.json", {"steps": {}, "version": "6", rt.STOPPED: {"check": "x"}})
+    rt.step_release(PARAMS, state)  # no registry call: the alias never moved
+    assert state["challenger_after_release"] == "never moved"

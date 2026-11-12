@@ -24,7 +24,7 @@ MANIFEST := models/serving/manifest.json
 SMOKE_AUDIT_SALT := smoke-test-audit-salt-not-secret
 
 .PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
-	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke monitoring-smoke review-ui stream simulate-review db-reset feedback-export gate retrain challenger-serving rollback challenger register kaggle-dataset kaggle-push kaggle-status kaggle-output
+	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke monitoring-smoke review-ui stream simulate-review db-reset feedback-export gate retrain challenger-serving rollback challenger loop-chunks loop-record fault-export loop-final loop-summary register kaggle-dataset kaggle-push kaggle-status kaggle-output
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -139,10 +139,10 @@ review-ui: ## Review queue UI on http://127.0.0.1:8501; reads the local log of `
 		--browser.gatherUsageStats false -- --config $(PARAMS)
 
 N ?= 40
-stream: ## SIMULATED stream: send N production_stream images to the API on :8000 (API_KEY from .env). ARGS: --start K
+stream: ## SIMULATED stream: send N production_stream images to the API on :8000 (API_KEY from .env). ARGS: --start K | --chunk C --out F
 	$(RUN) $(ENV_FILE) python -m src.pipelines.stream --config $(PARAMS) -n $(N) $(ARGS)
 
-simulate-review: ## SIMULATED reviewer labels production_stream images in the local queue. ARGS: --limit, --error-rate
+simulate-review: ## SIMULATED reviewer labels production_stream images in the local queue. ARGS: --limit, --error-rate, --out F
 	$(RUN_SERVE) $(ENV_FILE) python -m src.review.simulated --config $(PARAMS) $(ARGS)
 
 db-reset: ## Move the local SQLite log to data/archive/ and start an empty one (stop serve/review-ui first; ADR-032)
@@ -179,6 +179,22 @@ rollback: ## Move @champion back to its previous version (or VERSION=v) if serva
 challenger: ## Point @challenger at VERSION=v (servable, not the champion) to re-run the gate (ADR-035)
 	@test -n "$(VERSION)" || { echo "usage: make challenger VERSION=v"; exit 1; }
 	$(RUN_TRAIN) $(ENV_FILE) python -m src.tracking.rollback --config $(PARAMS) --set-challenger $(VERSION)
+
+loop-chunks: ## Disjoint stream chunks after the pilot -> data/splits/loop_chunks.csv (needs the pilot export; ADR-036)
+	$(RUN) python -m src.pipelines.loop --config $(PARAMS) chunks
+
+loop-record: ## Record a loop cycle: CYCLE=n|fault GATE=gate file -> results/loop/ (ADR-036)
+	@test -n "$(CYCLE)" || { echo "usage: make loop-record CYCLE=n GATE=results/promotion/gate_<v>.json"; exit 1; }
+	$(RUN_SERVE) $(ENV_FILE) python -m src.pipelines.loop --config $(PARAMS) record --cycle $(CYCLE) $(if $(GATE),--gate-file $(GATE),)
+
+fault-export: ## FAULT INJECTION: copy of the export with every label shifted -> data/feedback_fault/ (never real feedback; ADR-036)
+	$(RUN) python -m src.pipelines.loop --config $(PARAMS) fault-export
+
+loop-final: ## Once, after the last gate: original v2 vs final @champion on test_frozen, REPORT ONLY (ADR-036)
+	$(RUN_TRAIN) $(ENV_FILE) python -m src.pipelines.loop --config $(PARAMS) final
+
+loop-summary: ## results/loop/loop_summary.json + README.md table from the cycle records (ADR-036)
+	$(RUN) python -m src.pipelines.loop --config $(PARAMS) summary
 
 register: ## Publish the downloaded Kaggle run to MLflow. ARGS: --register, --role comparison, --results-dir DIR (ADR-020)
 	$(RUN_TRAIN) $(ENV_FILE) python -m src.tracking.publish --config $(PARAMS) $(ARGS)

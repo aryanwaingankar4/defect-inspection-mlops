@@ -41,30 +41,30 @@
   },
   "champion": {
     "registered_model": "steel-defect-classifier",
-    "version": "3",
+    "version": "5",
     "precision": "fp32",
-    "onnx_sha256": "20ca68a062bf2f64329f60358e73a6422db303ccb5bd79721c8d33fc7ab6b8ab",
-    "temperature": 1.5115263565117054,
-    "review_threshold": 0.9442617012921799,
-    "ood_energy_threshold": -7.290323721865889,
-    "val_predictions": "results/retrain/e7f25858ed574f3db2e2f37c4168cadb/val_predictions.csv",
+    "onnx_sha256": "c4e6332e11bfd4dac0aee7e46e5efd850b5b1508f73a96c92bf886993c6063f5",
+    "temperature": 1.3705637851028614,
+    "review_threshold": 0.9655030615434461,
+    "ood_energy_threshold": -6.199060956924484,
+    "val_predictions": "results/retrain/9b1c9dbd6d464eb291ba2605b3f35de6/val_predictions.csv",
     "images": [
       {
         "id": "synthetic",
         "source": "synthetic_golden.png",
         "image_sha256": "07dd69353cdebb6e212cc55e153d6b00144047b353cbcedec1c9cb12de9f9f92",
         "prediction": "scratches",
-        "calibrated_confidence": 0.9995688842330401,
-        "energy": -14.634882397060103,
+        "calibrated_confidence": 0.9900663401229745,
+        "energy": -13.59812206528696,
         "routed_to_review": false,
         "reasons": [],
         "logits": [
-          -3.092735528945923,
-          -3.620955467224121,
-          1.6103142499923706,
-          1.957624077796936,
-          -3.0059123039245605,
-          14.634230613708496
+          -1.905766487121582,
+          -1.2595109939575195,
+          1.4937760829925537,
+          7.249431610107422,
+          -1.0857048034667969,
+          13.584439277648926
         ]
       },
       {
@@ -72,17 +72,17 @@
         "source": "NEU-DET/train/images/crazing/crazing_130.jpg",
         "image_sha256": "79cef251160019422e3e4fec09c37bb0376574018990d604c505188f50e879c3",
         "prediction": "crazing",
-        "calibrated_confidence": 0.99836006730312,
-        "energy": -12.485729546885256,
+        "calibrated_confidence": 0.9999999813297319,
+        "energy": -24.635311152297774,
         "routed_to_review": false,
         "reasons": [],
         "logits": [
-          12.483248710632324,
-          -5.767741680145264,
-          2.371080160140991,
-          -7.776714324951172,
-          -7.4285173416137695,
-          0.6198039054870605
+          24.635311126708984,
+          -7.009192943572998,
+          0.011540770530700684,
+          -6.635140419006348,
+          -2.438669443130493,
+          -7.566159248352051
         ]
       },
       {
@@ -90,20 +90,20 @@
         "source": "NEU-DET/train/images/pitted_surface/pitted_surface_225.jpg",
         "image_sha256": "23be66132f661ba432b06ba402734cbe12d05d5eca0bebed90b99d9f15cec92f",
         "prediction": "pitted_surface",
-        "calibrated_confidence": 0.5068209474944835,
-        "energy": -7.115936501058266,
+        "calibrated_confidence": 0.7211014728946871,
+        "energy": -4.312821426044086,
         "routed_to_review": true,
         "reasons": [
           "low_confidence",
           "ood"
         ],
         "logits": [
-          -1.0621719360351562,
-          5.82224178314209,
-          -5.946610450744629,
-          6.088706970214844,
-          1.2195065021514893,
-          2.3739888668060303
+          -3.1956262588500977,
+          1.3310524225234985,
+          1.5119577646255493,
+          3.864680767059326,
+          -2.7549774646759033,
+          -0.6968412399291992
         ]
       }
     ]

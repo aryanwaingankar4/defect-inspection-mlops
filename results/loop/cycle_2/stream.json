@@ -1,0 +1,17 @@
+{
+  "stream": "simulated, production_stream (ADR-031)",
+  "start": null,
+  "chunk": "cycle2",
+  "sent": 520,
+  "statuses": {
+    "200": 520
+  },
+  "routed_to_review": 28,
+  "accepted_or_reasons": {
+    "accepted": 492,
+    "audit": 7,
+    "low_confidence": 20,
+    "ood": 10
+  },
+  "note": "not brand-new traffic: v2 predicted these images in the pilot (ADR-036)"
+}

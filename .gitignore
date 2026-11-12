@@ -16,6 +16,7 @@ venv/
 # Data and models (tracked by DVC, not git)
 /data/raw/
 /data/feedback/
+/data/feedback_fault/
 /data/archive/
 /data/xsdd/
 # models/: each folder is ignored by name. A wildcard (/models/*/ or /models/*) makes DVC treat

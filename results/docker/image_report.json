@@ -4,9 +4,9 @@
   "size_source": "docker image inspect .Size",
   "user_id": 10001,
   "read_only_root_filesystem": true,
-  "git_commit": "764b203",
-  "model_version": "2",
-  "onnx_sha256": "d49370a4d8e5161ef5aa50660db431734750e1815a1eb3a3972da2923400cb1f",
+  "git_commit": "8d8eeed",
+  "model_version": "3",
+  "onnx_sha256": "20ca68a062bf2f64329f60358e73a6422db303ccb5bd79721c8d33fc7ab6b8ab",
   "smoke_passed": true,
   "checked_by": "make docker-smoke (scripts/docker_smoke.py)"
 }

@@ -1,0 +1,93 @@
+{
+  "decision_record": "ADR-036",
+  "cycle": "2",
+  "fault_injection": false,
+  "note": "SIMULATED stream and SIMULATED reviewer (ADR-031); real Kaggle GPU training",
+  "chunk": "cycle2",
+  "stream": {
+    "stream": "simulated, production_stream (ADR-031)",
+    "start": null,
+    "chunk": "cycle2",
+    "sent": 520,
+    "statuses": {
+      "200": 520
+    },
+    "routed_to_review": 28,
+    "accepted_or_reasons": {
+      "accepted": 492,
+      "audit": 7,
+      "low_confidence": 20,
+      "ood": 10
+    },
+    "note": "not brand-new traffic: v2 predicted these images in the pilot (ADR-036)"
+  },
+  "review": {
+    "reviewer": "simulated (ADR-031)",
+    "error_rate": 0.0,
+    "seed": 31,
+    "queue_before": 28,
+    "labelled": 28,
+    "flipped": 0,
+    "skipped_test_frozen": 0,
+    "skipped_no_ground_truth": 0,
+    "skipped_not_production_stream": 0,
+    "queue_left": 0
+  },
+  "reviewer_error": {
+    "kind": "simulated",
+    "error_rate": 0.0,
+    "flipped": 0
+  },
+  "new_labels": 28,
+  "feedback_rows_used": 95,
+  "feedback_md5": "21ee36ef49491c1f934e7828764203e1",
+  "export_report": "results/loop/cycle_2/export_report.json",
+  "calibration": {
+    "source": "inherited_T",
+    "temperature": 1.5115263565117054,
+    "file": "results/retrain/5db757a94e8a4f16b28a0b5509afe737/calibration.json",
+    "inherited_from_version": "3",
+    "fit_on_bound": 0.25
+  },
+  "kaggle_wall_time_s": 181,
+  "kaggle_training_time_s": 23,
+  "retrain_record": "results/retrain/cycle_5db757a94e8a4f16b28a0b5509afe737.json",
+  "champion_version": "3",
+  "challenger_version": "4",
+  "val_macro_f1": {
+    "champion": 0.9944429008057795,
+    "challenger": 1.0
+  },
+  "decision": "promote",
+  "failed_checks": [],
+  "checks": {
+    "macro_f1": "macro-F1 drop -0.0056 within 0.01",
+    "class_recall": "largest recall drop +0.0000 (inclusion) within 0.05",
+    "mcnemar": "not significantly worse: p = 1, 0 champion-only vs 1 challenger-only correct",
+    "onnx_parity": "parity passed: max tolerance ratio 0.356 (<= 1 passes), same class 180/180, same routing 180/180, batch sizes ok"
+  },
+  "applied": true,
+  "gate_file": "results/promotion/gate_4.2.json",
+  "gate_record_file": "results/promotion/gate_4.json",
+  "applied_in": "results/promotion/gate_4.2.json",
+  "prediction_log_counts": {
+    "predictions": {
+      "2": {
+        "n": 1110,
+        "routed_to_review": 67
+      },
+      "3": {
+        "n": 520,
+        "routed_to_review": 28
+      }
+    },
+    "labels": [
+      {
+        "reviewer_kind": "simulated",
+        "simulated_error_rate": 0.0,
+        "n": 95,
+        "simulated_flipped": 0
+      }
+    ]
+  }
+}

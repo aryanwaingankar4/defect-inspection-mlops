@@ -27,6 +27,11 @@
   "feedback_rows_used": 67,
   "feedback_md5": "2104573eeacc32caeed4dcef91897d2c",
   "export_report": "results/loop/cycle_1/export_report.json",
+  "calibration": {
+    "source": "fitted",
+    "temperature": 1.5115263565117054,
+    "file": "results/retrain/e7f25858ed574f3db2e2f37c4168cadb/calibration.json"
+  },
   "kaggle_wall_time_s": 305,
   "kaggle_training_time_s": 40,
   "retrain_record": "results/retrain/cycle_e7f25858ed574f3db2e2f37c4168cadb.json",
@@ -53,13 +58,17 @@
       "2": {
         "n": 1110,
         "routed_to_review": 67
+      },
+      "3": {
+        "n": 520,
+        "routed_to_review": 28
       }
     },
     "labels": [
       {
         "reviewer_kind": "simulated",
         "simulated_error_rate": 0.0,
-        "n": 67,
+        "n": 95,
         "simulated_flipped": 0
       }
     ]

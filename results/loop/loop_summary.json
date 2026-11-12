@@ -1,0 +1,77 @@
+{
+  "decision_record": "ADR-036",
+  "note": "SIMULATED stream and SIMULATED reviewer (ADR-031); real Kaggle GPU training. Chunks: not brand-new traffic: v2 predicted every chunk image in the pilot (none labelled).",
+  "cycles": [
+    {
+      "cycle": "1",
+      "fault_injection": false,
+      "chunk": "all 1,110 production_stream images (pilot)",
+      "new_labels": 67,
+      "feedback_rows_used": 67,
+      "reviewer_error": {
+        "kind": "simulated",
+        "error_rate": 0.0,
+        "flipped": 0
+      },
+      "champion_version": "2",
+      "challenger_version": "3",
+      "val_macro_f1": {
+        "champion": 0.9779568398629248,
+        "challenger": 0.9944429008057795
+      },
+      "decision": "promote",
+      "failed_checks": [],
+      "applied": false,
+      "applied_in": "results/promotion/gate_3.2.json",
+      "gate_file": "results/promotion/gate_3.json",
+      "gate_record_file": "results/promotion/gate_3.json",
+      "retrain_record": "results/retrain/cycle_e7f25858ed574f3db2e2f37c4168cadb.json",
+      "export_report": "results/loop/cycle_1/export_report.json",
+      "calibration": {
+        "source": "fitted",
+        "temperature": 1.5115263565117054,
+        "file": "results/retrain/e7f25858ed574f3db2e2f37c4168cadb/calibration.json"
+      },
+      "kaggle_wall_time_s": 305,
+      "kaggle_training_time_s": 40,
+      "file": "results/loop/cycle_1/cycle.json"
+    },
+    {
+      "cycle": "2",
+      "fault_injection": false,
+      "chunk": "cycle2",
+      "new_labels": 28,
+      "feedback_rows_used": 95,
+      "reviewer_error": {
+        "kind": "simulated",
+        "error_rate": 0.0,
+        "flipped": 0
+      },
+      "champion_version": "3",
+      "challenger_version": "4",
+      "val_macro_f1": {
+        "champion": 0.9944429008057795,
+        "challenger": 1.0
+      },
+      "decision": "promote",
+      "failed_checks": [],
+      "applied": true,
+      "applied_in": "results/promotion/gate_4.2.json",
+      "gate_file": "results/promotion/gate_4.2.json",
+      "gate_record_file": "results/promotion/gate_4.json",
+      "retrain_record": "results/retrain/cycle_5db757a94e8a4f16b28a0b5509afe737.json",
+      "export_report": "results/loop/cycle_2/export_report.json",
+      "calibration": {
+        "source": "inherited_T",
+        "temperature": 1.5115263565117054,
+        "file": "results/retrain/5db757a94e8a4f16b28a0b5509afe737/calibration.json",
+        "inherited_from_version": "3",
+        "fit_on_bound": 0.25
+      },
+      "kaggle_wall_time_s": 181,
+      "kaggle_training_time_s": 23,
+      "file": "results/loop/cycle_2/cycle.json"
+    }
+  ],
+  "kaggle_wall_time_s_total": 181
+}

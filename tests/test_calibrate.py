@@ -210,3 +210,37 @@ def test_calibration_reproduces_committed_main_model(monkeypatch):
     old = json.loads((spec.results_dir / "calibration.json").read_text(encoding="utf-8"))
     for key in ("temperature", "at_bound", "temperature_interval", "fitted_on", "val"):
         assert new[key] == old[key], key
+
+
+# ---------------------------------------------------------------- ADR-037: inherited T
+
+
+def test_a_fit_on_its_bound_inherits_the_champion_t_only_in_a_retrain():
+    champ = {"version": "3", "temperature": 1.5115}
+    assert cb.choose_temperature(0.25, True, champ) == (1.5115, cb.INHERITED, False)
+    assert cb.choose_temperature(4.0, True, champ) == (1.5115, cb.INHERITED, False)  # upper bound
+    assert cb.choose_temperature(1.2, False, champ) == (1.2, cb.FITTED, False)  # fit kept
+    assert cb.choose_temperature(0.25, True, None) == (0.25, cb.FITTED, True)  # ADR-006: stop
+
+
+def test_a_zero_error_val_fit_lands_on_the_lower_bound():
+    """Why ADR-037 exists: with no val errors, NLL keeps falling as T shrinks."""
+    rng = np.random.default_rng(0)
+    y = np.repeat(np.arange(3), 20)
+    logits = rng.normal(0, 1, (60, 3))
+    logits[np.arange(60), y] += 4.0  # every image right
+    cfg = cb.CalibConfig.from_params(PARAMS)
+    t, at_bound = cb.fit(logits, y, cfg)
+    assert at_bound and t == pytest.approx(cfg.t_min)
+
+
+def test_inherited_payload_tags_its_source():
+    cal = json.loads(
+        (REPO_ROOT / _models()[0]["results_dir"] / "calibration.json").read_text(encoding="utf-8")
+    )
+    cal = {**cal, "calibration": cb.INHERITED, "decision_record": "ADR-006, ADR-037"}
+    _, tags = cb.mlflow_payload(cal)
+    assert (
+        tags["calibration_source"] == "inherited_T"
+        and "ADR-037" in tags["calibration_decision_record"]
+    )

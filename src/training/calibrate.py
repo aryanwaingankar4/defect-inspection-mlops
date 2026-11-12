@@ -155,10 +155,33 @@ def summary_text(cal: Mapping[str, Any]) -> str:
     return text
 
 
+INHERITED = "inherited_T"  # ADR-037
+FITTED = "fitted"
+
+
+def choose_temperature(
+    fitted_t: float, fit_at_bound: bool, inherit: Mapping[str, Any] | None
+) -> tuple[float, str, bool]:
+    """(T in use, ``fitted`` | ``inherited_T``, whether the T in use sits on a bound).
+
+    A fit on a range bound inherits the champion's T when ``inherit`` is given (retrain,
+    ADR-037); otherwise it stays on the bound and the caller stops (ADR-006)."""
+    if fit_at_bound and inherit is not None:
+        return float(inherit["temperature"]), INHERITED, False
+    return float(fitted_t), FITTED, bool(fit_at_bound)
+
+
 def calibrate_model(
-    spec: ModelSpec, params: Mapping[str, Any], cfg: CalibConfig, val_split: str
+    spec: ModelSpec,
+    params: Mapping[str, Any],
+    cfg: CalibConfig,
+    val_split: str,
+    inherit: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Fit T for one model and build its report (nothing written here)."""
+    """Fit T for one model and build its report (nothing written here).
+
+    ``inherit`` (retrain only, ADR-037): ``{"version", "temperature"}`` of the current champion.
+    If the fit sits on a range bound, that validated T is used instead and recorded as such."""
     recorded = check_checkpoint(spec)
     model, classes, timm_name = load_checkpoint(spec.checkpoint)
     split_csv, raw_dir = Path(params["data"]["split_file"]), Path(params["data"]["raw_dir"])
@@ -173,16 +196,19 @@ def calibrate_model(
     samples = grouped_bootstrap_indices(y, units, cfg.n_resamples, cfg.seed)
     folds = stratified_group_folds(y, units, cfg.cv_folds, cfg.seed)
 
-    temperature, at_bound = fit(logits, y, cfg)
+    fitted_t, fit_at_bound = fit(logits, y, cfg)
+    temperature, source, at_bound = choose_temperature(fitted_t, fit_at_bound, inherit)
     calibrated = softmax(logits, temperature)
     oof, fold_temps, fold_bounds = cross_fitted_probs(logits, y, folds, cfg)
     commit = git_commit(REPO_ROOT)
     cal = {
         "model": spec.name,
         "timm_model": timm_name,
-        "decision_record": "ADR-006",
+        "decision_record": "ADR-006" if source == FITTED else "ADR-006, ADR-037",
         "temperature": temperature,
         "at_bound": at_bound,
+        "calibration": source,
+        "fit": {"temperature": fitted_t, "at_bound": fit_at_bound},
         "t_range": [cfg.t_min, cfg.t_max],
         "method": "one temperature minimising mean val NLL (log grid + golden-section search)",
         "apply": "probabilities = softmax(logits / temperature); predicted class unchanged",
@@ -228,6 +254,14 @@ def calibrate_model(
             "torch": torch.__version__,
         },
     }
+    if source == INHERITED:
+        cal["inherited_from"] = {
+            "version": str(inherit["version"]),
+            "temperature": temperature,
+            "source": f"temperature tag of @champion v{inherit['version']} (its validated T)",
+            "why": "the val fit sat on a range bound (e.g. no val errors): val cannot "
+            "determine T for this model (ADR-037). The inherited T is NOT validated for it.",
+        }
     cal["summary"] = summary_text(cal)
     return {
         "spec": spec,
@@ -260,7 +294,8 @@ def write_outputs(result: Mapping[str, Any]) -> dict[str, Path]:
     )
     ins = cal["val"]["in_sample"]
     for when in ("before", "after"):
-        label = "raw softmax" if when == "before" else f"T = {cal['temperature']:.3f} (fitted here)"
+        how = "inherited, ADR-037" if cal.get("calibration") == INHERITED else "fitted here"
+        label = "raw softmax" if when == "before" else f"T = {cal['temperature']:.3f} ({how})"
         plot_reliability(
             ins[f"reliability_{when}"],
             ins[when]["ece"]["value"],
@@ -285,7 +320,8 @@ def mlflow_payload(cal: Mapping[str, Any]) -> tuple[dict[str, float], dict[str, 
     tags = {
         "calibration_split_file": cal["fitted_on"]["split_file"],
         "calibration_git_commit": cal["provenance"]["git_commit"],
-        "calibration_decision_record": "ADR-006",
+        "calibration_decision_record": cal["decision_record"],
+        "calibration_source": cal.get("calibration", FITTED),
     }
     return metrics, tags
 

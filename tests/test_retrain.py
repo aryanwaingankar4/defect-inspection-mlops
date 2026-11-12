@@ -583,3 +583,68 @@ def test_release_gives_the_challenger_back(tmp_path, monkeypatch):
     monkeypatch.setattr(mt, "version_by_alias", lambda cfg, alias: {"version": "7"})
     with pytest.raises(rt.RetrainError, match="no longer points"):
         rt.step_release(PARAMS, rt.State(tmp_path / "u.json", {"steps": {}, "version": "6"}))
+
+
+# ---------------------------------------------------------------- ADR-037: inherited T
+
+
+def test_calibration_tag_and_record():
+    metrics = {
+        "model": "efficientnet_b0",
+        "checkpoint_sha256": "a" * 64,
+        "feedback": {"md5": MD5, "rows": 7},
+        "run_uid": "u" * 32,
+    }
+    assert rt.challenger_tags(metrics, 1.5, 0.8)["calibration"] == "fitted"
+    tags = rt.challenger_tags(metrics, 1.5, 0.8, calibration="inherited_T")
+    assert tags["calibration"] == "inherited_T"
+
+
+def test_champion_temperature_comes_from_its_tag(monkeypatch):
+    from src.tracking import mlflow_tracking as mt
+
+    monkeypatch.setattr(mt, "version_tags", lambda cfg, v: {"temperature": "1.5115"})
+    assert rt.champion_temperature(PARAMS, "3") == {"version": "3", "temperature": 1.5115}
+    monkeypatch.setattr(mt, "version_tags", lambda cfg, v: {})
+    with pytest.raises(rt.RetrainError, match="no temperature tag"):
+        rt.champion_temperature(PARAMS, "3")
+
+
+def test_calibrate_step_passes_the_champion_t_and_records_the_source(tmp_path, monkeypatch):
+    from src.training import calibrate as cal
+    from src.training import threshold as th
+
+    results = tmp_path / "r"
+    results.mkdir()
+    (results / "val_metrics.json").write_text(json.dumps({"model": "efficientnet_b0"}), "utf-8")
+    seen = {}
+
+    def fake_calibrate(spec, params, cfg, split, inherit=None):
+        seen["inherit"] = inherit
+        return {
+            "cal": {
+                "temperature": inherit["temperature"],
+                "at_bound": False,
+                "calibration": "inherited_T",
+                "fit": {"temperature": 0.25, "at_bound": True},
+            }
+        }
+
+    monkeypatch.setattr(rt, "champion_temperature", lambda p, v: {"version": v, "temperature": 1.5})
+    monkeypatch.setattr(cal, "calibrate_model", fake_calibrate)
+    monkeypatch.setattr(cal, "write_outputs", lambda result: {})
+    monkeypatch.setattr(cal, "log_to_mlflow", lambda *a: "run")
+    monkeypatch.setattr(th, "run", lambda p, log_mlflow: {"result": {"threshold": 0.9}})
+    state = rt.State(
+        tmp_path / "s.json",
+        {
+            "steps": {},
+            "champion_version": "3",
+            "results_dir": str(results),
+            "challenger_checkpoint": str(tmp_path / "c.pt"),
+        },
+    )
+    rt.step_calibrate(PARAMS, state)
+    assert seen["inherit"] == {"version": "3", "temperature": 1.5}
+    assert state["calibration"] == "inherited_T" and state["temperature"] == 1.5
+    assert state["fitted_temperature"] == 0.25

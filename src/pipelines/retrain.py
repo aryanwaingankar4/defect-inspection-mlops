@@ -18,6 +18,7 @@ Steps:
   register          publish + register the run (results to ``results/retrain/<run_uid>/``) and
                     keep the checkpoint in ``models/versions/v<version>/``
   calibrate         temperature + review threshold on val for the challenger (ADR-006/023)
+                    (a T fit on a range bound inherits the champion's T, ADR-037)
   challenger        version tags, then ``@challenger`` -> the new version
   serving           FP32 ONNX + parity, ``serving_precision``, OOD threshold on val (ADR-035)
   versions          ``dvc add models/versions`` (commit models/versions.dvc, then ``make push``)
@@ -202,7 +203,11 @@ def fault_params(params: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def challenger_tags(
-    metrics: Mapping[str, Any], temperature: float, threshold: float, fault: bool = False
+    metrics: Mapping[str, Any],
+    temperature: float,
+    threshold: float,
+    fault: bool = False,
+    calibration: str = "fitted",
 ) -> dict:
     fb = metrics["feedback"]
     extra = {FAULT_TAG: "true"} if fault else {}
@@ -212,6 +217,7 @@ def challenger_tags(
         "checkpoint_sha256": metrics["checkpoint_sha256"],
         "temperature": repr(float(temperature)),
         "review_threshold": repr(float(threshold)),
+        "calibration": calibration,  # fitted | inherited_T (ADR-037)
         "feedback_md5": fb["md5"],
         "feedback_rows": str(fb["rows"]),
         "train_run_uid": metrics["run_uid"],
@@ -248,6 +254,12 @@ def cycle_record(state: State, gate_record: Mapping[str, Any], gate_file: str) -
         "champion_version": d["champion_version"],
         "challenger_version": d["version"],
         "challenger_val_macro_f1_at_training": d["train_val_macro_f1"],
+        "calibration": {
+            "source": d.get("calibration", "fitted"),
+            "temperature": d.get("temperature"),
+            "fitted_temperature": d.get("fitted_temperature"),
+            "decision_record": "ADR-037" if d.get("calibration") == "inherited_T" else "ADR-006",
+        },
         "gate": {
             "mode": "record (applied: false); @champion not moved (ADR-034)",
             "decision": gate_record["decision"],
@@ -400,6 +412,17 @@ def challenger_params(
     return p
 
 
+def champion_temperature(params: Mapping[str, Any], version: str) -> dict[str, Any]:
+    """The champion's validated T (its ``temperature`` tag), for ADR-037."""
+    from src.tracking import mlflow_tracking as mt
+
+    cfg = mt.TrackingConfig.from_params(params, smoke=False)
+    tags = mt.version_tags(cfg, version)
+    if not tags.get("temperature"):
+        raise RetrainError(f"@champion v{version} has no temperature tag")
+    return {"version": str(version), "temperature": float(tags["temperature"])}
+
+
 def step_calibrate(params: Mapping[str, Any], state: State) -> None:
     from src.training import calibrate as cal
     from src.training import threshold as th
@@ -412,8 +435,11 @@ def step_calibrate(params: Mapping[str, Any], state: State) -> None:
         metrics["model"], Path(state["challenger_checkpoint"]), Path(state["results_dir"])
     )
     val_split = str(params["train"]["val_split"])
-    result = cal.calibrate_model(spec, params, cal.CalibConfig.from_params(params), val_split)
-    if result["cal"]["at_bound"]:
+    inherit = champion_temperature(params, state["champion_version"])
+    result = cal.calibrate_model(
+        spec, params, cal.CalibConfig.from_params(params), val_split, inherit=inherit
+    )
+    if result["cal"]["at_bound"]:  # cannot happen with ``inherit``; kept as a guard
         raise RetrainError(f"challenger temperature {result['cal']['temperature']} on its bound")
     files = cal.write_outputs(result)
     cal.log_to_mlflow(params, spec, files)
@@ -423,6 +449,8 @@ def step_calibrate(params: Mapping[str, Any], state: State) -> None:
     thr = th.run(p, log_mlflow=True)
     state.finish(
         "calibrate",
+        calibration=result["cal"]["calibration"],
+        fitted_temperature=float(result["cal"]["fit"]["temperature"]),
         temperature=float(result["cal"]["temperature"]),
         review_threshold=float(thr["result"]["threshold"]),
     )
@@ -443,6 +471,7 @@ def step_challenger(params: Mapping[str, Any], state: State) -> None:
             state["temperature"],
             state["review_threshold"],
             fault=bool(state.data.get("fault_injection")),
+            calibration=state.data.get("calibration", "fitted"),
         ),
     )
     alias = str(params["promotion"]["challenger_alias"])

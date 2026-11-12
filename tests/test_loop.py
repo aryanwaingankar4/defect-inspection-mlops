@@ -263,9 +263,13 @@ def gate_file(
 
 
 def retrain_record(
-    folder: Path, uid: str, version: str, md5: str, rows: int, gate: Path, fault=False
+    folder: Path, uid: str, version: str, md5: str, rows: int, gate: Path, fault=False, cal=None
 ):
+    calibration = cal or {"calibration": "fitted", "temperature": 1.5}
+    (folder / uid).mkdir(parents=True, exist_ok=True)
+    (folder / uid / "calibration.json").write_text(json.dumps(calibration), "utf-8")
     record = {
+        "run_uid": uid,
         "fault_injection": fault,
         "challenger_version": version,
         "feedback": {"md5": md5, "rows": rows},
@@ -344,6 +348,14 @@ def test_pilot_facts_come_from_the_log_before_cycle_2():
         lp.pilot_facts(later, 67)
 
 
+INHERITED_CAL = {
+    "calibration": "inherited_T",
+    "temperature": 1.5115,
+    "fit": {"temperature": 0.25, "at_bound": True},
+    "inherited_from": {"version": "4"},
+}
+
+
 def fault_cycle(params, tmp_path):
     report = lp.fault_export(params)
     promo = tmp_path / "promotion"
@@ -351,8 +363,9 @@ def fault_cycle(params, tmp_path):
         promo, "gate_6.json", "4", "6", "reject", False, failed=("macro_f1", "class_recall")
     )
     retrain_record(
-        Path(params["retrain"]["results_dir"]), "fff", "6", report["csv_md5"], 7, gate, fault=True
-    )
+        Path(params["retrain"]["results_dir"]), "fff", "6", report["csv_md5"], 7, gate,
+        fault=True, cal=INHERITED_CAL,
+    )  # fmt: skip
     return gate
 
 
@@ -380,13 +393,17 @@ def test_summary_and_readme_table(loop_files, tmp_path):
     readme = (Path(params["loop"]["out_dir"]) / "README.md").read_text("utf-8")
     assert lp.render_table(s) in readme and "SIMULATED" in readme and "not brand-new" in readme
     table = lp.render_table(s).splitlines()
-    assert table[0].split(" | ")[1:5] == [
+    assert table[0].split(" | ")[1:6] == [
         "Labels",
         "Reviewer error",
+        "Challenger T",
         "Val macro-F1 (champion vs challenger)",
         "Verdict",
     ]
     assert "PROMOTE (applied)" in table[2] and "gate_4.2.json" in table[2]
+    assert "fitted (1.5000)" in table[2] and "ADR-037" in readme
+    assert "inherited_T from v4 (1.5115; fit on bound 0.25)" in table[3]
+    assert s["cycles"][1]["calibration"]["source"] == "inherited_T"
     assert "REJECT (record only: fault injection)" in table[3]
     assert "failed: macro_f1, class_recall" in table[3] and "BROKEN: all 7 labels" in table[3]
     assert s["kaggle_wall_time_s_total"] == 600

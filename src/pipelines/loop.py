@@ -186,6 +186,22 @@ def applied_in(params: Mapping[str, Any], version: str) -> str | None:
     return None
 
 
+def calibration_of(params: Mapping[str, Any], retrain: Mapping[str, Any]) -> dict[str, Any]:
+    """How the challenger's T was set (ADR-006 fitted, or ADR-037 inherited), from its
+    ``calibration.json``."""
+    path = Path(params["retrain"]["results_dir"]) / retrain["run_uid"] / "calibration.json"
+    cal = read_json(path)
+    out = {
+        "source": cal.get("calibration", "fitted"),
+        "temperature": cal["temperature"],
+        "file": path.as_posix(),
+    }
+    if out["source"] == "inherited_T":
+        out["inherited_from_version"] = cal["inherited_from"]["version"]
+        out["fit_on_bound"] = cal["fit"]["temperature"]
+    return out
+
+
 def pilot_facts(counts: Mapping[str, Any], pilot_rows: int) -> tuple[dict, dict]:
     """The pilot's stream and review summaries, read back from the prediction log. Only valid
     before cycle 2 starts: every prediction must be v2's and every label the pilot's."""
@@ -239,7 +255,7 @@ def record_cycle(
     folder.mkdir(parents=True, exist_ok=True)
     if not fault:
         shutil.copyfile(report_src, folder / "export_report.json")
-    if cycle == "1":
+    if cycle == "1" and not (folder / "stream.json").is_file():  # read once, before cycle 2
         if db_counts is None:
             raise LoopError("the pilot record needs the prediction log (DATABASE_URL)")
         stream, review = pilot_facts(db_counts, int(retrain["feedback"]["rows"]))
@@ -273,6 +289,7 @@ def record_cycle(
         "export_report": (
             report_src.as_posix() if fault else (folder / "export_report.json").as_posix()
         ),
+        "calibration": calibration_of(params, retrain),
         "kaggle_wall_time_s": retrain["kaggle"]["wall_time_s"],
         "kaggle_training_time_s": retrain["kaggle"]["training_time_s"],
         "retrain_record": retrain_path.as_posix(),
@@ -317,11 +334,20 @@ def table_rows(summary: Mapping[str, Any]) -> list[list[str]]:
         else:
             error = f"{err['error_rate']:.0%} ({err['flipped']} flipped)"
         f1 = c["val_macro_f1"]
+        cal = c["calibration"]
+        if cal["source"] == "inherited_T":
+            t = (
+                f"inherited_T from v{cal['inherited_from_version']} ({cal['temperature']:.4f}; "
+                f"fit on bound {cal['fit_on_bound']:.2f})"
+            )
+        else:
+            t = f"fitted ({cal['temperature']:.4f})"
         rows.append(
             [
                 "fault injection" if c["fault_injection"] else str(c["cycle"]),
                 f"{c['new_labels']} new / {c['feedback_rows_used']} used",
                 error,
+                t,
                 f"v{c['champion_version']} {f1['champion']:.4f} vs "
                 f"v{c['challenger_version']} {f1['challenger']:.4f}",
                 verdict(c)
@@ -336,6 +362,7 @@ HEADER = [
     "Cycle",
     "Labels",
     "Reviewer error",
+    "Challenger T",
     "Val macro-F1 (champion vs challenger)",
     "Verdict",
     "Gate file",
@@ -357,6 +384,9 @@ def render_readme(summary: Mapping[str, Any]) -> str:
         f"images the pilot did not label: {NOT_NEW}. Each cycle retrains from the base checkpoint "
         "on `train_v1` + all feedback so far. The gate is non-inferiority on `val` (ADR-033); "
         "val has 180 images, so differences of a few images are within noise.\n",
+        "**Challenger T:** the temperature fitted on val or, if that fit sat on a range bound "
+        "(e.g. no val errors), the champion's T inherited under ADR-037, a rule added after "
+        "cycle 2 exposed the gap. An inherited T is not validated for the challenger.\n",
         render_table(summary),
     ]
     final = summary.get("final_test_frozen")
@@ -391,7 +421,7 @@ def summarise(params: Mapping[str, Any]) -> dict[str, Any]:
         "cycle", "fault_injection", "chunk", "new_labels", "feedback_rows_used", "reviewer_error",
         "champion_version", "challenger_version", "val_macro_f1", "decision", "failed_checks",
         "applied", "applied_in", "gate_file", "gate_record_file", "retrain_record",
-        "export_report", "kaggle_wall_time_s", "kaggle_training_time_s",
+        "export_report", "calibration", "kaggle_wall_time_s", "kaggle_training_time_s",
     )  # fmt: skip
     summary: dict[str, Any] = {
         "decision_record": DECISION_RECORD,

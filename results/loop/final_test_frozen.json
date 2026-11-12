@@ -1,0 +1,242 @@
+{
+  "decision_record": "ADR-036",
+  "REPORT_ONLY": "run once after the last gate; no decision, threshold or cycle uses it",
+  "note": "SIMULATED stream and SIMULATED reviewer (ADR-031); real Kaggle GPU training",
+  "split": "test_frozen",
+  "split_file": "neu_split_v2.csv",
+  "split_sha256": "f38cdd74a1437d512db8012edfd28f534687e17fe01dac1e21d56c747b3062ec",
+  "n_images": 360,
+  "classes": [
+    "crazing",
+    "inclusion",
+    "patches",
+    "pitted_surface",
+    "rolled-in_scale",
+    "scratches"
+  ],
+  "models": [
+    {
+      "version": "2",
+      "role": "original champion",
+      "macro_f1": {
+        "value": 0.9917095403684417,
+        "ci_low": 0.9807881442642843,
+        "ci_high": 1.0
+      },
+      "accuracy": {
+        "value": 0.9916666666666667,
+        "ci_low": 0.9806629834254144,
+        "ci_high": 1.0
+      },
+      "n_errors": 3,
+      "recall": {
+        "crazing": {
+          "value": 1.0,
+          "ci_low": 1.0,
+          "ci_high": 1.0
+        },
+        "inclusion": {
+          "value": 1.0,
+          "ci_low": 1.0,
+          "ci_high": 1.0
+        },
+        "patches": {
+          "value": 1.0,
+          "ci_low": 1.0,
+          "ci_high": 1.0
+        },
+        "pitted_surface": {
+          "value": 0.9666666666666667,
+          "ci_low": 0.9137931034482759,
+          "ci_high": 1.0
+        },
+        "rolled-in_scale": {
+          "value": 1.0,
+          "ci_low": 1.0,
+          "ci_high": 1.0
+        },
+        "scratches": {
+          "value": 0.9833333333333333,
+          "ci_low": 0.9464285714285714,
+          "ci_high": 1.0
+        }
+      },
+      "confusion_matrix": {
+        "rows": "true class",
+        "columns": "predicted",
+        "counts": [
+          [
+            60,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            60,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            60,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            2,
+            0,
+            58,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            60,
+            0
+          ],
+          [
+            0,
+            1,
+            0,
+            0,
+            0,
+            59
+          ]
+        ]
+      }
+    },
+    {
+      "version": "5",
+      "role": "final champion",
+      "macro_f1": {
+        "value": 0.9972220293075909,
+        "ci_low": 0.9912219912219912,
+        "ci_high": 1.0
+      },
+      "accuracy": {
+        "value": 0.9972222222222222,
+        "ci_low": 0.9914529914529915,
+        "ci_high": 1.0
+      },
+      "n_errors": 1,
+      "recall": {
+        "crazing": {
+          "value": 1.0,
+          "ci_low": 1.0,
+          "ci_high": 1.0
+        },
+        "inclusion": {
+          "value": 1.0,
+          "ci_low": 1.0,
+          "ci_high": 1.0
+        },
+        "patches": {
+          "value": 1.0,
+          "ci_low": 1.0,
+          "ci_high": 1.0
+        },
+        "pitted_surface": {
+          "value": 1.0,
+          "ci_low": 1.0,
+          "ci_high": 1.0
+        },
+        "rolled-in_scale": {
+          "value": 1.0,
+          "ci_low": 1.0,
+          "ci_high": 1.0
+        },
+        "scratches": {
+          "value": 0.9833333333333333,
+          "ci_low": 0.9464285714285714,
+          "ci_high": 1.0
+        }
+      },
+      "confusion_matrix": {
+        "rows": "true class",
+        "columns": "predicted",
+        "counts": [
+          [
+            60,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            60,
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            60,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            60,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            0,
+            0,
+            60,
+            0
+          ],
+          [
+            0,
+            1,
+            0,
+            0,
+            0,
+            59
+          ]
+        ]
+      }
+    }
+  ],
+  "macro_f1_difference": {
+    "of": "v5 - v2",
+    "value": 0.005512488939149129,
+    "ci_low": 0.0,
+    "ci_high": 0.01412215714000609
+  },
+  "paired": {
+    "both_right": 357,
+    "only_v2_right": 0,
+    "only_v5_right": 2,
+    "both_wrong": 1
+  },
+  "bootstrap": {
+    "method": "cluster bootstrap stratified by class, percentile interval (ADR-022)",
+    "unit": "confirmed near-copy group (ADR-021) or single image",
+    "n_units": 319,
+    "n_resamples": 10000,
+    "seed": 11,
+    "level": 0.95
+  },
+  "time_utc": "2026-11-12T11:44:34+00:00"
+}

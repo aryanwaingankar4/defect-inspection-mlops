@@ -71,7 +71,173 @@
       "kaggle_wall_time_s": 181,
       "kaggle_training_time_s": 23,
       "file": "results/loop/cycle_2/cycle.json"
+    },
+    {
+      "cycle": "3",
+      "fault_injection": false,
+      "chunk": "cycle3",
+      "new_labels": 26,
+      "feedback_rows_used": 121,
+      "reviewer_error": {
+        "kind": "simulated",
+        "error_rate": 0.05,
+        "flipped": 2
+      },
+      "champion_version": "4",
+      "challenger_version": "5",
+      "val_macro_f1": {
+        "champion": 1.0,
+        "challenger": 0.9944429008057795
+      },
+      "decision": "promote",
+      "failed_checks": [],
+      "applied": true,
+      "applied_in": "results/promotion/gate_5.2.json",
+      "gate_file": "results/promotion/gate_5.2.json",
+      "gate_record_file": "results/promotion/gate_5.json",
+      "retrain_record": "results/retrain/cycle_9b1c9dbd6d464eb291ba2605b3f35de6.json",
+      "export_report": "results/loop/cycle_3/export_report.json",
+      "calibration": {
+        "source": "fitted",
+        "temperature": 1.3705637851028614,
+        "file": "results/retrain/9b1c9dbd6d464eb291ba2605b3f35de6/calibration.json"
+      },
+      "kaggle_wall_time_s": 242,
+      "kaggle_training_time_s": 42,
+      "file": "results/loop/cycle_3/cycle.json"
+    },
+    {
+      "cycle": "fault",
+      "fault_injection": true,
+      "chunk": null,
+      "new_labels": 0,
+      "feedback_rows_used": 121,
+      "reviewer_error": {
+        "kind": "broken",
+        "rule": "shift_to_next_class",
+        "labels_changed": 121
+      },
+      "champion_version": "5",
+      "challenger_version": "6",
+      "val_macro_f1": {
+        "champion": 0.9944429008057795,
+        "challenger": 0.7427780631170462
+      },
+      "decision": "stopped_before_gate",
+      "failed_checks": [
+        "review_threshold_risk (ADR-023)"
+      ],
+      "applied": false,
+      "applied_in": null,
+      "gate_file": null,
+      "gate_record_file": null,
+      "retrain_record": "results/retrain/cycle_a86807ab505243fab23168a780b756da.json",
+      "export_report": "results/loop/fault_injection/export_report.json",
+      "calibration": {
+        "source": "fitted",
+        "temperature": 1.9900664741253182,
+        "file": "results/retrain/a86807ab505243fab23168a780b756da/calibration.json"
+      },
+      "kaggle_wall_time_s": 183,
+      "kaggle_training_time_s": 26,
+      "file": "results/loop/fault_injection/cycle.json"
     }
   ],
-  "kaggle_wall_time_s_total": 181
+  "kaggle_wall_time_s_total": 606,
+  "final_file": "results/loop/final_test_frozen.json",
+  "final_test_frozen": {
+    "n_images": 360,
+    "models": [
+      {
+        "version": "2",
+        "role": "original champion",
+        "macro_f1": {
+          "value": 0.9917095403684417,
+          "ci_low": 0.9807881442642843,
+          "ci_high": 1.0
+        },
+        "n_errors": 3,
+        "recall": {
+          "crazing": {
+            "value": 1.0,
+            "ci_low": 1.0,
+            "ci_high": 1.0
+          },
+          "inclusion": {
+            "value": 1.0,
+            "ci_low": 1.0,
+            "ci_high": 1.0
+          },
+          "patches": {
+            "value": 1.0,
+            "ci_low": 1.0,
+            "ci_high": 1.0
+          },
+          "pitted_surface": {
+            "value": 0.9666666666666667,
+            "ci_low": 0.9137931034482759,
+            "ci_high": 1.0
+          },
+          "rolled-in_scale": {
+            "value": 1.0,
+            "ci_low": 1.0,
+            "ci_high": 1.0
+          },
+          "scratches": {
+            "value": 0.9833333333333333,
+            "ci_low": 0.9464285714285714,
+            "ci_high": 1.0
+          }
+        }
+      },
+      {
+        "version": "5",
+        "role": "final champion",
+        "macro_f1": {
+          "value": 0.9972220293075909,
+          "ci_low": 0.9912219912219912,
+          "ci_high": 1.0
+        },
+        "n_errors": 1,
+        "recall": {
+          "crazing": {
+            "value": 1.0,
+            "ci_low": 1.0,
+            "ci_high": 1.0
+          },
+          "inclusion": {
+            "value": 1.0,
+            "ci_low": 1.0,
+            "ci_high": 1.0
+          },
+          "patches": {
+            "value": 1.0,
+            "ci_low": 1.0,
+            "ci_high": 1.0
+          },
+          "pitted_surface": {
+            "value": 1.0,
+            "ci_low": 1.0,
+            "ci_high": 1.0
+          },
+          "rolled-in_scale": {
+            "value": 1.0,
+            "ci_low": 1.0,
+            "ci_high": 1.0
+          },
+          "scratches": {
+            "value": 0.9833333333333333,
+            "ci_low": 0.9464285714285714,
+            "ci_high": 1.0
+          }
+        }
+      }
+    ],
+    "macro_f1_difference": {
+      "of": "v5 - v2",
+      "value": 0.005512488939149129,
+      "ci_low": 0.0,
+      "ci_high": 0.01412215714000609
+    }
+  }
 }

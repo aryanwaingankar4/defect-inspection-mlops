@@ -550,10 +550,16 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
     - If the update or the smoke fails, it redeploys that digest, re-runs the smoke, writes `results/cloud/rollback_*.json` and **fails** the workflow.
     - The golden check also catches a model change: if `@champion` moves without `make golden`, the smoke fails and the previous image comes back.
   - **Rollback drill:** run once with a deliberately broken image (the good image with a start command that exits), recorded in `results/cloud/rollback_drill.json`.
-  - **Proving runs before merge:** the PR is not merged by the agent, `workflow_dispatch` only works for workflows on the default branch, and the federated credential only trusts `main`. So the proving runs used:
-    - a **temporary** extra federated credential for `refs/heads/phase-5-deploy`;
-    - a **temporary** `push` trigger on that branch.
-    - Both were removed before the PR was handed over. The deploy report records the run URL.
+  - **Proving runs (what actually happened, 2026-11-13):**
+    - The identity was created with a federated credential for `main` **only**, as decided.
+    - A temporary credential for the feature branch would have allowed a real run before merge. Setting it up was blocked by the agent's safety check, and it was not part of the owner's decisions, so it was not created.
+    - `workflow_dispatch` only works for workflows on the default branch, so **the first real workflow run happens after the PR is merged**: the `workflow_run` trigger after CI on `main`, or a manual dispatch. Its run URL goes into `results/cloud/deploy_report.json` then.
+    - The **rollback drill** was run from the deployer's machine with the same code path as the workflow (`scripts/azure.py ci-deploy --drill`), against the live app, recorded in `results/cloud/rollback_drill.json` (`workflow_run_url: null`):
+      - the broken image (the good image with a start command that exits) failed `/health`;
+      - the previous digest was redeployed;
+      - the smoke then passed (model v5);
+      - the command exited non-zero.
+    - A drill through the workflow (`rollback_drill: true`) is possible after merge.
 - **Reason:**
   - OIDC removes the long-lived secret.
   - Scoped roles limit what a compromised workflow could do.

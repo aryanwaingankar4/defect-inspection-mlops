@@ -1,0 +1,30 @@
+{
+  "decision_record": "ADR-040",
+  "generated_at": "2026-11-13T17:03:20Z",
+  "drill": true,
+  "workflow_run_url": null,
+  "git_commit": "a8b910e945e138747a05635b0d7d454b25ac730a",
+  "failed_image": "steelsentry74zbwmoyl4dtu.azurecr.io/defect-inspection-api@sha256:4a69adaff422560f6c3b1a00777fb1beb2f148190a0470b240716dad615b5368",
+  "failed_update_error": null,
+  "failed_smoke_checks": {
+    "health_200_ok": false,
+    "predict_golden_matches_expected": false,
+    "predict_without_key_401": false
+  },
+  "rolled_back_to": "steelsentry74zbwmoyl4dtu.azurecr.io/defect-inspection-api@sha256:5852c886a5cd6affba4ea760e382d6036fe124fe3a2e3af73d291f649f2aa955",
+  "image_after_rollback": "steelsentry74zbwmoyl4dtu.azurecr.io/defect-inspection-api@sha256:5852c886a5cd6affba4ea760e382d6036fe124fe3a2e3af73d291f649f2aa955",
+  "rollback_smoke_passed": true,
+  "rollback_smoke_checks": {
+    "health_200_ok": true,
+    "predict_golden_matches_expected": true,
+    "predict_without_key_401": true,
+    "latency_requests_all_200": true
+  },
+  "model_after_rollback": {
+    "name": "steel-defect-classifier",
+    "version": "5",
+    "alias": "champion",
+    "precision": "fp32"
+  },
+  "workflow_result": "failed (by design: a failed deploy always fails the workflow)"
+}

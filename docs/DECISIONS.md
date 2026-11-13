@@ -521,3 +521,45 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
     - Resource names carry the region (`-eastasia`), so the move could run side by side. The uaenorth Log Analytics workspace, ACR, identity and environment were deleted once the eastasia ones were up.
     - Postgres moved into its own module, `infra/postgres.bicep`. The probe deploys only that module; `main.bicep` uses the same module, so it adopts the probed server without changing it.
     - **Cost in eastasia (retail prices, 2026-11-13):** B1ms $0.0286/h ≈ $20.88, storage 32 GB × $0.15 ≈ $4.80, ACR Basic ≈ $5.07. That is **≈ $30.75/month** with Postgres running all the time, above the $25 line set before creation. With `make pg-stop` when idle it is ≈ $9.9 (storage + ACR). Container Apps (scale to zero) and Log Analytics stay within their free grants. Flagged to the owner.
+
+## ADR-040 — Deploy workflow: GitHub OIDC to a managed identity, bundle from @champion, Trivy on the image, automatic rollback to the previous digest
+- **Context:** TASK-041, plus a light TASK-042. ADR-039 deploys from the laptop. Deploys should run from `main` with no long-lived Azure secret. The express Container Apps environment keeps a single revision (`--latest`), so a rollback means redeploying the previous image.
+- **Decision (owner decisions of 2026-11-13, written before the code):**
+  - **Auth: GitHub OIDC, no client secret.**
+    - A user-assigned managed identity, `steelsentry-gh-deploy`, has a **federated credential** for `repo:aryanwaingankar4/defect-inspection-mlops:ref:refs/heads/main`. Everything is in `infra/github-deploy.bicep`.
+    - Least privilege, scoped to `rg-steelsentry` only:
+      - **AcrPush** on the registry;
+      - **Container Apps Contributor** on the resource group, to update the app;
+      - **Managed Identity Operator** on the pull identity only, because updating an app that uses that identity needs its `assign` action.
+    - No subscription-level role.
+    - `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID` are GitHub **repo variables**. They are identifiers, not secrets. The resource group, registry and app names are variables too.
+  - **Triggers:** `workflow_dispatch`, and `workflow_run` after **CI** completes successfully on `main`. The workflow checks out the commit CI tested.
+  - **Model source:** the workflow builds the serving bundle from **`@champion`** in the DagsHub MLflow registry (`make serving-bundle`; read-only, SHA-256 checked, ADR-028).
+    - No NEU images are needed. It installs the `train` group because the tracking module imports `mlflow.pytorch`.
+    - `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME` and `MLFLOW_TRACKING_PASSWORD` are GitHub **secrets**, set with `gh secret set` from the deployer's environment and never printed.
+    - **The token is the owner's DagsHub token, which can write.** A read-only token would be better (follow-up).
+  - **Steps:**
+    1. Build the bundle, then the image (`make docker-build`).
+    2. **Trivy** on the built image, with the CI policy (TASK-035): report HIGH and CRITICAL, fail on CRITICAL with a fix available.
+    3. Push to ACR tagged with the **git SHA**.
+    4. Deploy **by digest** (`az containerapp update --image`).
+    5. Cloud smoke: `/health`, the golden `/predict` against `tests/golden/expected.json`, and 401 without the key. The smoke needs `API_KEY`, a GitHub secret.
+    - The app's other secrets (`AUDIT_SALT`, `DATABASE_URL`) stay as Container App secrets and are not in GitHub. Infrastructure and migrations stay on `make azure-up` / `make azure-deploy` (ADR-039). The workflow only changes the image.
+  - **Rollback (TASK-042 light):**
+    - Before deploying, the workflow records the image digest that is currently running.
+    - If the update or the smoke fails, it redeploys that digest, re-runs the smoke, writes `results/cloud/rollback_*.json` and **fails** the workflow.
+    - The golden check also catches a model change: if `@champion` moves without `make golden`, the smoke fails and the previous image comes back.
+  - **Rollback drill:** run once with a deliberately broken image (the good image with a start command that exits), recorded in `results/cloud/rollback_drill.json`.
+  - **Proving runs before merge:** the PR is not merged by the agent, `workflow_dispatch` only works for workflows on the default branch, and the federated credential only trusts `main`. So the proving runs used:
+    - a **temporary** extra federated credential for `refs/heads/phase-5-deploy`;
+    - a **temporary** `push` trigger on that branch.
+    - Both were removed before the PR was handed over. The deploy report records the run URL.
+- **Reason:**
+  - OIDC removes the long-lived secret.
+  - Scoped roles limit what a compromised workflow could do.
+  - Building from `@champion` makes the registry the source of truth for what ships.
+  - Rollback by digest is exact and fits the express environment.
+- **Consequences:**
+  - Each deploy installs torch through the `train` group, which is slow (see the post-sprint CPU-torch task).
+  - Each deploy runs 22 synthetic `/predict` calls, which are logged in the Azure database like any other request.
+  - A failed smoke always ends with a red workflow, even when the rollback succeeds, so a person looks at it.

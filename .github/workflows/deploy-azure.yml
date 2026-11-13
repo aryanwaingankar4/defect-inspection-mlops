@@ -93,10 +93,25 @@ jobs:
 
       - name: Push to ACR tagged with the git SHA
         id: push
+        env:
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
         run: |
           sha="$(git rev-parse HEAD)"
-          server="$(az acr show -n "$ACR_NAME" --query loginServer -o tsv)"
-          az acr login -n "$ACR_NAME"
+          # The deploy identity has AcrPush only (data plane, no ARM read on the registry), so
+          # `az acr show` / `az acr login` cannot look the registry up. Exchange the OIDC Azure
+          # token for an ACR refresh token directly (documented ACR token exchange).
+          server="${ACR_NAME}.azurecr.io"
+          aad="$(az account get-access-token --query accessToken -o tsv)"
+          echo "::add-mask::$aad"
+          refresh="$(curl -sSf -X POST "https://$server/oauth2/exchange" \
+            --data-urlencode grant_type=access_token \
+            --data-urlencode "service=$server" \
+            --data-urlencode "tenant=$AZURE_TENANT_ID" \
+            --data-urlencode "access_token=$aad" \
+            | python3 -c 'import json, sys; print(json.load(sys.stdin)["refresh_token"])')"
+          echo "::add-mask::$refresh"
+          printf '%s' "$refresh" | docker login "$server" \
+            -u 00000000-0000-0000-0000-000000000000 --password-stdin
           image="$server/defect-inspection-api"
           docker tag defect-inspection-api:local "$image:$sha"
           docker push "$image:$sha"

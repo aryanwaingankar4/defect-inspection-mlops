@@ -513,3 +513,4 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
   - Container Apps has no read-only root filesystem option, unlike `docker-compose.yml`.
   - The API connects as the server admin. A least-privilege app role is a follow-up.
   - CI/CD deploy from `main` (TASK-041) is still open; it will reuse `infra/main.bicep`.
+  - **Blocked (2026-11-13):** Azure refused Postgres `Standard_B1ms` in `uaenorth` for this subscription with `SkuNotAvailable`. It was tried with no zone, then zones 1, 2 and 3 (`list-skus` lists B1ms in zones 1-3). Log Analytics, ACR, the pull identity and the Container Apps environment were created. No database and no app exist yet. Owner decision: stop here. The region or SKU choice is reopened, with `eastasia` as the named backup.

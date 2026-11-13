@@ -18,6 +18,9 @@ param pgAdminLogin string
 @description('Postgres admin password (from AZURE_PG_ADMIN_PASSWORD in .env).')
 param pgAdminPassword string
 
+@description('Availability zone for Postgres B1ms (uaenorth lists it in zones 1-3 only).')
+param pgZone string = '1'
+
 @description('Postgres database the API logs to.')
 param pgDatabaseName string = 'defect'
 
@@ -105,6 +108,7 @@ resource pg 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
   }
   properties: {
     version: '16'
+    availabilityZone: pgZone
     administratorLogin: pgAdminLogin
     administratorLoginPassword: pgAdminPassword
     storage: {

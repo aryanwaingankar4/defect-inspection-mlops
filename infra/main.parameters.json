@@ -4,6 +4,7 @@
   "parameters": {
     "prefix": { "value": "steelsentry" },
     "pgAdminLogin": { "value": "steelsentryadmin" },
-    "pgDatabaseName": { "value": "defect" }
+    "pgDatabaseName": { "value": "defect" },
+    "pgZone": { "value": "1" }
   }
 }

@@ -125,6 +125,13 @@ def need_env(*names: str) -> dict[str, str]:
 def deploy_bicep(params: dict[str, object]) -> dict:
     """Deploy infra/main.bicep with non-secret params from the parameters file and the
     given params (secrets included) from a temporary file that is always deleted."""
+    deploy_template(INFRA / "main.bicep", DEPLOYMENT, params, base=INFRA / "main.parameters.json")
+    return outputs()
+
+
+def deploy_template(
+    template: Path, name: str, params: dict[str, object], base: Path | None = None
+) -> None:
     with tempfile.TemporaryDirectory(prefix="steelsentry-") as tmp:
         pfile = Path(tmp) / "secure.parameters.json"
         pfile.write_text(
@@ -137,16 +144,16 @@ def deploy_bicep(params: dict[str, object]) -> dict:
             ),
             encoding="utf-8",
         )
+        base_args = ["-p", f"@{base}"] if base else []
         az(
             "deployment", "group", "create",
             "-g", RESOURCE_GROUP,
-            "-n", DEPLOYMENT,
-            "-f", str(INFRA / "main.bicep"),
-            "-p", f"@{INFRA / 'main.parameters.json'}",
+            "-n", name,
+            "-f", str(template),
+            *base_args,
             "-p", f"@{pfile}",
             "-o", "none",
         )  # fmt: skip
-    return outputs()
 
 
 def outputs() -> dict[str, str]:
@@ -213,7 +220,7 @@ def migrate(out: dict[str, str], password: str) -> None:
     print("adding a temporary Postgres firewall rule for this machine ...")
     az(
         "postgres", "flexible-server", "firewall-rule", "create", "-g", RESOURCE_GROUP,
-        "-n", out["pgServerName"], "-r", FIREWALL_RULE,
+        "-s", out["pgServerName"], "-n", FIREWALL_RULE,
         "--start-ip-address", ip, "--end-ip-address", ip, "-o", "none",
     )  # fmt: skip
     try:
@@ -228,7 +235,7 @@ def migrate(out: dict[str, str], password: str) -> None:
     finally:
         az(
             "postgres", "flexible-server", "firewall-rule", "delete", "-g", RESOURCE_GROUP,
-            "-n", out["pgServerName"], "-r", FIREWALL_RULE, "--yes",
+            "-s", out["pgServerName"], "-n", FIREWALL_RULE, "--yes",
         )  # fmt: skip
         print("removed the temporary firewall rule")
 
@@ -332,7 +339,9 @@ def cmd_smoke(git_commit: str | None = None) -> None:
         "decision_record": "ADR-039",
         "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "url": base,
-        "region": LOCATION,
+        "region": app.get("location"),
+        "postgres_region": out.get("pgLocation"),
+        "resource_group_metadata_region": LOCATION,
         "resource_group": RESOURCE_GROUP,
         "container_app": out["appName"],
         "revision": revision,
@@ -349,11 +358,14 @@ def cmd_smoke(git_commit: str | None = None) -> None:
             "golden_reasons": pred.get("reasons"),
             "expected": {k: want[k] for k in ("prediction", "calibrated_confidence", "reasons")},
         },
-        "first_health_seconds_incl_cold_start": first_health_s,
+        "first_health_seconds": first_health_s,
+        "first_health_note": "cold start only if the app had scaled to zero; right after a "
+        "deploy the new replica is usually already running",
         "predict_latency_client_side": {
             **latency_summary(ms),
             "note": "sequential, warm replica, measured from the deployer's machine "
-            "(includes internet round trip to uaenorth); not a load test (TASK-043)",
+            f"(includes the internet round trip to {app.get('location')}); "
+            "not a load test (TASK-043)",
         },
         "checked_by": "make azure-smoke (scripts/azure.py)",
     }
@@ -387,15 +399,70 @@ def cmd_down() -> None:
     print("deletion started (runs in Azure for a few minutes)")
 
 
+PROBE_REGIONS = ("eastasia", "indiasouthcentral", "malaysiawest", "indonesiacentral")
+
+
+def set_parameters(**values: str) -> None:
+    """Write non-secret values into infra/main.parameters.json (kept in git)."""
+    path = INFRA / "main.parameters.json"
+    data = json.loads(path.read_text("utf-8"))
+    for k, v in values.items():
+        data["parameters"][k] = {"value": v}
+    path.write_bytes((json.dumps(data, indent=2) + "\n").encode())
+
+
+def cmd_pg_probe() -> None:
+    """Create ONLY the Postgres server (B1ms, no zone, random name) region by region and keep
+    the first that works; failed servers are deleted. Records region + name in the
+    parameters file so main.bicep adopts that server (ADR-039)."""
+    env = need_env("AZURE_PG_ADMIN_PASSWORD")
+    regions = os.environ.get("AZURE_PG_PROBE_REGIONS", ",".join(PROBE_REGIONS)).split(",")
+    for region in regions:
+        name = f"steelsentry-pg-{uuid.uuid4().hex[:8]}"
+        print(f"probe {region}: creating {name} (B1ms, no zone) ...", flush=True)
+        t0 = time.perf_counter()
+        try:
+            deploy_template(
+                INFRA / "postgres.bicep",
+                f"steelsentry-pg-probe-{region}",
+                {
+                    "location": region,
+                    "serverName": name,
+                    "adminLogin": _param("pgAdminLogin"),
+                    "adminPassword": env["AZURE_PG_ADMIN_PASSWORD"],
+                    "databaseName": _param("pgDatabaseName"),
+                },
+            )
+        except DeployError as exc:
+            code = next((c for c in ("SkuNotAvailable", "RequestDisallowedByPolicy",
+                                     "LocationIsOfferRestricted", "ServerNameAlreadyExists")
+                         if c in str(exc)), "error")  # fmt: skip
+            print(f"  failed after {time.perf_counter() - t0:.0f} s: {code}", flush=True)
+            try:
+                az("postgres", "flexible-server", "delete", "-g", RESOURCE_GROUP, "-n", name,
+                   "--yes")  # fmt: skip
+                print(f"  deleted {name}")
+            except DeployError:
+                print(f"  {name} not present (nothing to delete)")
+            continue
+        print(f"  OK in {time.perf_counter() - t0:.0f} s: {name} in {region}")
+        set_parameters(pgLocation=region, pgServerName=name)
+        print("  recorded pgLocation / pgServerName in infra/main.parameters.json")
+        return
+    raise DeployError(f"Postgres B1ms failed in every probed region: {', '.join(regions)}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("command", choices=["up", "deploy", "smoke", "pg-stop", "pg-start", "down"])
+    commands = ["up", "deploy", "smoke", "pg-probe", "pg-stop", "pg-start", "down"]
+    parser.add_argument("command", choices=commands)
     args = parser.parse_args()
     try:
         {
             "up": cmd_up,
             "deploy": cmd_deploy,
             "smoke": cmd_smoke,
+            "pg-probe": cmd_pg_probe,
             "pg-stop": lambda: cmd_pg("stop"),
             "pg-start": lambda: cmd_pg("start"),
             "down": cmd_down,

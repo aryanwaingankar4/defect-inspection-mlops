@@ -5,7 +5,7 @@
 
 targetScope = 'resourceGroup'
 
-@description('Azure region (policy allows uaenorth; backup eastasia).')
+@description('Azure region of the app resources (eastasia: Postgres B1ms is not offered to this subscription in uaenorth, ADR-039). Names carry the region so a region move can run side by side.')
 param location string = resourceGroup().location
 
 @description('Short prefix for resource names.')
@@ -18,8 +18,14 @@ param pgAdminLogin string
 @description('Postgres admin password (from AZURE_PG_ADMIN_PASSWORD in .env).')
 param pgAdminPassword string
 
-@description('Availability zone for Postgres B1ms (uaenorth lists it in zones 1-3 only).')
-param pgZone string = '1'
+@description('Postgres region; may differ from location when B1ms is not offered there (ADR-039).')
+param pgLocation string = location
+
+@description('Postgres server name (globally unique).')
+param pgServerName string = '${prefix}-pg-${uniqueString(resourceGroup().id, location)}'
+
+@description('Availability zone for Postgres; empty = no preference.')
+param pgZone string = ''
 
 @description('Postgres database the API logs to.')
 param pgDatabaseName string = 'defect'
@@ -40,7 +46,7 @@ param auditSalt string = ''
 @description('postgresql+psycopg://...?sslmode=require (built by scripts/azure.py).')
 param databaseUrl string = ''
 
-var suffix = uniqueString(resourceGroup().id)
+var suffix = uniqueString(resourceGroup().id, location)
 var acrPullRoleId = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
 var tags = {
   project: 'steelsentry'
@@ -48,7 +54,7 @@ var tags = {
 }
 
 resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
-  name: '${prefix}-logs'
+  name: '${prefix}-logs-${location}'
   location: location
   tags: tags
   properties: {
@@ -68,7 +74,7 @@ resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
 }
 
 resource pullIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
-  name: '${prefix}-api-pull'
+  name: '${prefix}-api-pull-${location}'
   location: location
   tags: tags
 }
@@ -84,7 +90,7 @@ resource acrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 }
 
 resource env 'Microsoft.App/managedEnvironments@2024-03-01' = {
-  name: '${prefix}-env'
+  name: '${prefix}-env-${location}'
   location: location
   tags: tags
   properties: {
@@ -98,65 +104,17 @@ resource env 'Microsoft.App/managedEnvironments@2024-03-01' = {
   }
 }
 
-resource pg 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
-  name: '${prefix}-pg-${suffix}'
-  location: location
-  tags: tags
-  sku: {
-    name: 'Standard_B1ms'
-    tier: 'Burstable'
+module pg 'postgres.bicep' = {
+  name: 'steelsentry-postgres'
+  params: {
+    location: pgLocation
+    serverName: pgServerName
+    adminLogin: pgAdminLogin
+    adminPassword: pgAdminPassword
+    databaseName: pgDatabaseName
+    zone: pgZone
+    tags: tags
   }
-  properties: {
-    version: '16'
-    availabilityZone: pgZone
-    administratorLogin: pgAdminLogin
-    administratorLoginPassword: pgAdminPassword
-    storage: {
-      storageSizeGB: 32
-      autoGrow: 'Disabled'
-    }
-    backup: {
-      backupRetentionDays: 7
-      geoRedundantBackup: 'Disabled'
-    }
-    highAvailability: { mode: 'Disabled' }
-    network: { publicNetworkAccess: 'Enabled' }
-    authConfig: {
-      passwordAuth: 'Enabled'
-      activeDirectoryAuth: 'Disabled'
-    }
-  }
-}
-
-resource pgDb 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2024-08-01' = {
-  parent: pg
-  name: pgDatabaseName
-  properties: {
-    charset: 'UTF8'
-    collation: 'en_US.utf8'
-  }
-}
-
-resource pgTls 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-01' = {
-  parent: pg
-  name: 'require_secure_transport'
-  properties: {
-    value: 'on'
-    source: 'user-override'
-  }
-  dependsOn: [pgDb]
-}
-
-// Only Azure services (0.0.0.0). The deployer IP is added and removed around migrations
-// by scripts/azure.py, never here. No VNet: trade-off in ADR-039.
-resource pgAzure 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2024-08-01' = {
-  parent: pg
-  name: 'AllowAllAzureServicesAndResourcesWithinAzureIps'
-  properties: {
-    startIpAddress: '0.0.0.0'
-    endIpAddress: '0.0.0.0'
-  }
-  dependsOn: [pgTls]
 }
 
 resource api 'Microsoft.App/containerApps@2024-03-01' = if (deployApp) {
@@ -225,12 +183,13 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = if (deployApp) {
       }
     }
   }
-  dependsOn: [acrPull, pgAzure]
+  dependsOn: [acrPull, pg]
 }
 
 output acrName string = acr.name
 output acrLoginServer string = acr.properties.loginServer
-output pgServerName string = pg.name
-output pgHost string = pg.properties.fullyQualifiedDomainName
+output pgServerName string = pg.outputs.name
+output pgHost string = pg.outputs.host
+output pgLocation string = pg.outputs.location
 output envName string = env.name
 output appName string = '${prefix}-api'

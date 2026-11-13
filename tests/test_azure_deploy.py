@@ -48,7 +48,9 @@ def test_report_refuses_secret_values() -> None:
 
 
 def test_bicep_has_no_secret_defaults_and_locked_settings() -> None:
-    text = (ROOT / "infra" / "main.bicep").read_text("utf-8")
+    text = "\n".join(
+        (ROOT / "infra" / f).read_text("utf-8") for f in ("main.bicep", "postgres.bicep")
+    )
     params = json.loads((ROOT / "infra" / "main.parameters.json").read_text("utf-8"))
     for name in ("pgAdminPassword", "apiKey", "auditSalt", "databaseUrl"):
         assert name not in params["parameters"]

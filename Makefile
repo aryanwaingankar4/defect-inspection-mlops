@@ -25,7 +25,7 @@ SMOKE_AUDIT_SALT := smoke-test-audit-salt-not-secret
 
 .PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
 	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke docker-smoke-postgres monitoring-smoke db-migrate pg-up pg-down test-db-postgres review-ui stream simulate-review db-reset feedback-export gate retrain challenger-serving rollback challenger loop-chunks loop-record fault-export loop-final loop-summary register kaggle-dataset kaggle-push kaggle-status kaggle-output \
-	azure-up azure-deploy azure-smoke pg-stop pg-start azure-down
+	azure-up azure-deploy azure-smoke pg-probe pg-stop pg-start azure-down
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -243,6 +243,9 @@ azure-deploy: ## Build + push the image to ACR, migrate Azure Postgres, deploy t
 
 azure-smoke: ## Cloud smoke of the running app -> results/cloud/deploy_report.json (synthetic image only)
 	$(AZURE) smoke
+
+pg-probe: ## Create ONLY Postgres B1ms region by region (eastasia first), keep the first success (ADR-039)
+	$(AZURE) pg-probe
 
 pg-stop: ## Stop the Azure Postgres server (saves compute cost; Azure restarts it after 7 days)
 	$(AZURE) pg-stop

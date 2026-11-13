@@ -60,6 +60,7 @@ Thumbs.db
 /TASKS.md
 /docs/MEMORY.md
 /docs/LEARNING.md
+/INTERVIEW_PREP.md
 
 # Local Claude Code permissions (per machine)
 /.claude/settings.local.json

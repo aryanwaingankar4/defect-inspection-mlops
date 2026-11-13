@@ -475,3 +475,41 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
   - After pulling this change, existing local logs need `make db-migrate` once.
   - Azure will need a migration step before each deploy (a Container Apps job; TASK-039/041).
   - The API image grows by Alembic and psycopg; the size is recorded in `results/docker/image_report.json`.
+
+## ADR-039 — Azure deployment: one Bicep file, image pushed to ACR, managed-identity pull, migrate before start, public Postgres with a firewall
+- **Context:** TASK-036, 038 and 039. The API (ADR-012, ADR-028) and its Postgres log (ADR-014, ADR-038) go to Azure for Students. The subscription policy allows only a few regions, and Container Apps is not offered in `indiasouthcentral`. The deadline is 14 Nov 2026, so the setup must be small, repeatable and cheap.
+- **Decision (owner decisions of 2026-11-13, written before the code):**
+  - **Infrastructure as code:** `infra/main.bicep` plus `infra/main.parameters.json` (non-secret values only). It is deployed with `az deployment group create` (incremental, idempotent) to resource group `rg-steelsentry` in **`uaenorth`**. The backup region is `eastasia`.
+  - **Resources:**
+    - Log Analytics workspace (30-day retention).
+    - Azure Container Registry, **Basic**, admin user **off**.
+    - A user-assigned managed identity with **AcrPull** on the registry. A user-assigned identity, not a system-assigned one, so the pull permission exists before the app is created.
+    - A Container Apps environment (consumption only) that sends logs to Log Analytics.
+    - Postgres Flexible Server **B1ms (Burstable)**, 32 GB, **PostgreSQL 16**, `require_secure_transport=on`, 7-day backups (the minimum), no geo-redundant backup, no HA. Database `defect`.
+  - **Postgres network:** public access with firewall rules only, and **no VNet**.
+    - The rule "allow Azure services" (`0.0.0.0`) stays, so the Container App can connect.
+    - The deployer's IP is added only for the migration step and removed right after, including when the migration fails.
+    - **Trade-off:** "allow Azure services" admits traffic from any Azure tenant's resources, not only ours. Access still needs the admin password and TLS. A VNet-integrated environment with private access would close this, but it costs more, takes longer to build, and needs a workload-profiles environment. Out of scope for the sprint.
+  - **Image:** built locally from the commit being deployed (`make docker-build`, serving bundle inside, ADR-028), then pushed with `docker push` to ACR. ACR Tasks are not used. The Container App references the image **by digest**, not by tag.
+  - **Container App:** external HTTPS ingress to port 8000, **min replicas 0, max 1**, 0.5 vCPU / 1 GiB.
+    - Probes: liveness and readiness on `/health`.
+    - Container App secrets: `API_KEY`, `AUDIT_SALT` and `DATABASE_URL` (`postgresql+psycopg://…?sslmode=require`), exposed to the app as env vars.
+    - Their values come only from the deployer's environment (`.env` loaded by `uv run --env-file`). They are written to a temporary parameters file that is deleted after the deployment. They are never printed or committed, and never written to `results/`.
+  - **Migrations before start:** `azure-deploy` runs `python -m src.db.migrate upgrade` against the Azure database (the IP window above) **before** the app revision is created. The API itself never migrates (ADR-038); it refuses to start on a database that is not at head.
+  - **Cloud smoke:** `/health` 200; `/predict` with the committed **synthetic** golden image (no NEU pixels go to the cloud, ADR-015/017) matches `tests/golden/expected.json` (prediction and confidence within 1e-4); 401 without the key; client-side p50 latency over 20 requests after a warm-up.
+    - The random audit (ADR-030) may add `audit` to the reasons, so the reasons are compared without `audit`.
+    - Written to `results/cloud/deploy_report.json`: URL, revision, image digest, smoke results, latencies. No secrets, no IP address.
+  - **Make targets:** `azure-up` (infrastructure), `azure-deploy` (build, push, migrate, app, smoke), `azure-smoke`, `pg-stop` / `pg-start`, and `azure-down` (deletes the resource group after typing its name).
+  - **Budget:** a $10/month budget on the resource group (separate `infra/budget.bicep`), alerting the subscription Owner role at 50/80/100%, so no email address is in the repo. If the offer does not support budgets, `azure-up` warns and goes on; the Azure for Students credit is the hard cap.
+- **Reason:**
+  - One Bicep file makes the environment reviewable and repeatable.
+  - Managed-identity pull removes registry passwords.
+  - Digest references make the deployed bits exact.
+  - Migrating first keeps the API's "never migrate" rule (ADR-038).
+  - Scale to zero and a stoppable B1ms keep the cost near the estimate.
+- **Consequences:**
+  - Estimated cost ≈ $24/month with Postgres running all the time (retail prices for uaenorth, 2026-11-13), or ≈ $9.5 with `make pg-stop` when idle. A stopped server is restarted by Azure after 7 days.
+  - The first request after scale to zero is a cold start (TASK-043 measures it).
+  - Container Apps has no read-only root filesystem option, unlike `docker-compose.yml`.
+  - The API connects as the server admin. A least-privilege app role is a follow-up.
+  - CI/CD deploy from `main` (TASK-041) is still open; it will reuse `infra/main.bicep`.

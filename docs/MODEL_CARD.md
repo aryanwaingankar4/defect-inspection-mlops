@@ -100,6 +100,11 @@ INT8 failed the rule fixed beforehand (ADR-026), so FP32 serves. The latencies a
 - **Inherited temperature.** ADR-037 lets a challenger inherit the champion's T when its own fit hits a bound. That T is not validated for the challenger.
 - **No drift monitoring.** Evidently was not built.
 
+## Future work
+
+- Add an OOD-detection non-inferiority check to the promotion gate (v5 passed with weaker OOD flagging than v2).
+- Detection (YOLO on the NEU-DET boxes), drift monitoring on per-image features, and unseen-defect OOD tests (X-SDD).
+
 ## What is simulated
 
 - **The reviewer** is simulated. Labels come from the dataset's true labels, with a seeded error rate of 0% (cycles 1–2) or 5% (cycle 3). The planned 15% cycle was not run.

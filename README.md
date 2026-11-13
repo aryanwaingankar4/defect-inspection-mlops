@@ -122,9 +122,7 @@ No video; follow these steps instead (TASK-046).
    - `make serve`, `make stream N=40`, `make review-ui`.
    - A review card shows the image, the prediction, the calibrated confidence, the OOD score and why it was routed: low confidence, OOD or audit.
    - Audit cards are blind: they hide the prediction.
-   ![Review UI](docs/images/review_ui.png)
 4. **Monitoring.** `make docker-up`, send traffic, then open Grafana on :3000. The dashboard (`monitoring/grafana/dashboards/defect-api.json`) has requests per second, `/predict` latency, calibrated confidence, energy (OOD score), routing reasons, review queue size and log write failures.
-   ![Grafana](docs/images/grafana.png)
 5. **Gate and rollback.** Open `results/loop/README.md` (each cycle's verdict) and `results/cloud/rollback_drill.json` (the broken image rolled back).
 
 ## Key decisions
@@ -155,6 +153,7 @@ All 40 are in [`docs/DECISIONS.md`](docs/DECISIONS.md). The ones that shape the 
 
 ## Future work
 
+- Add an OOD-detection non-inferiority check to the promotion gate (v5 passed with weaker OOD flagging than v2).
 - Detection: YOLO on the NEU-DET boxes already in the dataset copy, with mAP and box review.
 - Drift monitoring on per-image features (Evidently), and real unseen-defect OOD tests (X-SDD).
 - A least-privilege database role; private networking; a read-only DagsHub token for CI.

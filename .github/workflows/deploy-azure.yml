@@ -1,0 +1,130 @@
+# Deploy the API to Azure Container Apps (TASK-041/042, ADR-040).
+# OIDC to a user-assigned managed identity: no Azure secret is stored anywhere. Builds the
+# serving bundle from @champion on DagsHub (no NEU images), builds the image, scans it with
+# Trivy (CI policy), pushes it to ACR tagged with the git SHA, deploys it by digest and runs the
+# cloud smoke. A failed deploy redeploys the image that ran before and fails the workflow.
+name: Deploy to Azure
+
+on:
+  workflow_dispatch:
+    inputs:
+      rollback_drill:
+        description: "Rollback drill: deploy a deliberately broken image (expect a red run)"
+        type: boolean
+        default: false
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-azure
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build, scan, push, deploy, smoke
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_CONTAINER_APP: ${{ vars.AZURE_CONTAINER_APP }}
+      ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
+      ROLLBACK_DRILL: ${{ inputs.rollback_drill == true }}
+      TRIVY_VERSION: "0.76.1"
+      TRIVY_SHA256: c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # workflow_run: deploy exactly the commit CI tested
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.6"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install from the lockfile (train group for the MLflow client)
+        run: uv sync --locked --group train --group serve
+
+      - name: Serving bundle from @champion (DagsHub MLflow, read-only use)
+        env:
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+        run: make serving-bundle ENV_FILE=
+
+      - name: Build the image
+        run: make docker-build
+
+      - name: Install Trivy (pinned release, checksum verified)
+        run: |
+          tarball="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -sSfL -o "$RUNNER_TEMP/$tarball" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/${tarball}"
+          echo "${TRIVY_SHA256}  $RUNNER_TEMP/$tarball" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/trivy"
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP/trivy" trivy
+          echo "$RUNNER_TEMP/trivy" >> "$GITHUB_PATH"
+
+      - name: Trivy on the image (report HIGH/CRITICAL; fail on CRITICAL with a fix)
+        run: |
+          {
+            echo '## Trivy image scan: HIGH and CRITICAL (report)'
+            echo '```'
+            trivy image --scanners vuln,secret --severity HIGH,CRITICAL --exit-code 0 --quiet defect-inspection-api:local
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          trivy image --scanners vuln,secret --severity CRITICAL --ignore-unfixed --exit-code 1 --no-progress defect-inspection-api:local
+
+      - name: Azure login (OIDC, no secret)
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Push to ACR tagged with the git SHA
+        id: push
+        run: |
+          sha="$(git rev-parse HEAD)"
+          server="$(az acr show -n "$ACR_NAME" --query loginServer -o tsv)"
+          az acr login -n "$ACR_NAME"
+          image="$server/defect-inspection-api"
+          docker tag defect-inspection-api:local "$image:$sha"
+          docker push "$image:$sha"
+          digest_ref="$(docker inspect --format '{{index .RepoDigests 0}}' "$image:$sha")"
+          if [ "$ROLLBACK_DRILL" = "true" ]; then
+            # Deliberately broken image: the good image with a start command that exits.
+            printf 'FROM %s\nCMD ["python", "-c", "raise SystemExit(\\"rollback drill: deliberately broken image\\")"]\n' \
+              "$digest_ref" | docker build -t "$image:$sha-broken" -
+            docker push "$image:$sha-broken"
+            digest_ref="$(docker inspect --format '{{index .RepoDigests 0}}' "$image:$sha-broken")"
+          fi
+          echo "image=$digest_ref" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy by digest + cloud smoke (rollback to the previous digest on failure)
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+          IMAGE: ${{ steps.push.outputs.image }}
+          SHA: ${{ steps.push.outputs.sha }}
+        run: |
+          drill=""
+          if [ "$ROLLBACK_DRILL" = "true" ]; then drill="--drill"; fi
+          uv run --locked python scripts/azure.py ci-deploy --image "$IMAGE" --git-commit "$SHA" $drill
+
+      - name: Upload deploy / rollback reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cloud-reports
+          path: results/cloud/*.json
+          if-no-files-found: ignore

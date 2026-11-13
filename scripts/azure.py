@@ -41,7 +41,7 @@ REPOSITORY = "defect-inspection-api"
 LOCAL_IMAGE = "defect-inspection-api:local"
 FIREWALL_RULE = "deployer-temp-migrations"
 LATENCY_REQUESTS = 20
-SECRET_ENVS = ("API_KEY", "AUDIT_SALT", "AZURE_PG_ADMIN_PASSWORD")
+SECRET_ENVS = ("API_KEY", "AUDIT_SALT", "AZURE_PG_ADMIN_PASSWORD", "MLFLOW_TRACKING_PASSWORD")
 AZ_WINDOWS = Path(r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd")
 
 
@@ -272,13 +272,15 @@ def cmd_deploy() -> None:
 def http(url: str, *, data: bytes | None = None, headers: dict[str, str] | None = None):
     req = urllib.request.Request(url, data=data, headers=headers or {})
     try:
-        with urllib.request.urlopen(req, timeout=120) as r:
+        with urllib.request.urlopen(req, timeout=60) as r:
             return r.status, json.loads(r.read())
     except urllib.error.HTTPError as e:
         try:
             return e.code, json.loads(e.read())
         except json.JSONDecodeError:
             return e.code, {}
+    except (urllib.error.URLError, TimeoutError, ConnectionError, json.JSONDecodeError):
+        return 0, {}
 
 
 def multipart(png: bytes) -> tuple[bytes, str]:
@@ -293,19 +295,32 @@ def multipart(png: bytes) -> tuple[bytes, str]:
     )
 
 
-def cmd_smoke(git_commit: str | None = None) -> None:
+def app_name() -> str:
+    return os.environ.get("AZURE_CONTAINER_APP") or f"{_param('prefix')}-api"
+
+
+def run_url() -> str | None:
+    if os.environ.get("GITHUB_RUN_ID"):
+        return (
+            f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
+            f"/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+        )
+    return None
+
+
+def smoke(health_timeout: float = 300.0) -> dict:
+    """Cloud smoke of the running app; returns a report (never raises on a failed check)."""
     env = need_env("API_KEY")
-    out = outputs()
-    app = az_json("containerapp", "show", "-g", RESOURCE_GROUP, "-n", out["appName"])
+    name = app_name()
+    app = az_json("containerapp", "show", "-g", RESOURCE_GROUP, "-n", name)
     fqdn = app["properties"]["configuration"]["ingress"]["fqdn"]
     base = f"https://{fqdn}"
     image = app["properties"]["template"]["containers"][0]["image"]
-    revision = app["properties"]["latestRevisionName"]
     checks: dict[str, bool] = {}
 
     t0 = time.perf_counter()
     status, health = 0, {}
-    while time.perf_counter() - t0 < 300:
+    while time.perf_counter() - t0 < health_timeout:
         status, health = http(base + "/health")
         if status == 200 and health.get("status") == "ok":
             break
@@ -313,41 +328,42 @@ def cmd_smoke(git_commit: str | None = None) -> None:
     first_health_s = round(time.perf_counter() - t0, 1)
     checks["health_200_ok"] = status == 200 and health.get("status") == "ok"
 
-    png = (GOLDEN / "synthetic_golden.png").read_bytes()
     want = next(
         e
         for e in json.loads((GOLDEN / "expected.json").read_text("utf-8"))["champion"]["images"]
         if e["id"] == "synthetic"
     )
-    body, ctype = multipart(png)
-    keyed = {"Content-Type": ctype, "X-API-Key": env["API_KEY"]}
-    status, pred = http(base + "/predict", data=body, headers=keyed)
-    checks["predict_golden_matches_expected"] = status == 200 and golden_matches(pred, want)
-    status, err = http(base + "/predict", data=body, headers={"Content-Type": ctype})
-    checks["predict_without_key_401"] = status == 401
-
+    pred: dict = {}
     ms: list[float] = []
-    for _ in range(LATENCY_REQUESTS):
-        t = time.perf_counter()
-        s, _ = http(base + "/predict", data=body, headers=keyed)
-        ms.append((time.perf_counter() - t) * 1000)
-        if s != 200:
-            checks["latency_requests_all_200"] = False
-    checks.setdefault("latency_requests_all_200", True)
+    if checks["health_200_ok"]:
+        body, ctype = multipart((GOLDEN / "synthetic_golden.png").read_bytes())
+        keyed = {"Content-Type": ctype, "X-API-Key": env["API_KEY"]}
+        status, pred = http(base + "/predict", data=body, headers=keyed)
+        checks["predict_golden_matches_expected"] = status == 200 and golden_matches(pred, want)
+        status, _ = http(base + "/predict", data=body, headers={"Content-Type": ctype})
+        checks["predict_without_key_401"] = status == 401
+        ok = True
+        for _ in range(LATENCY_REQUESTS):
+            t = time.perf_counter()
+            s, _ = http(base + "/predict", data=body, headers=keyed)
+            ms.append((time.perf_counter() - t) * 1000)
+            ok &= s == 200
+        checks["latency_requests_all_200"] = ok
+    else:
+        for k in ("predict_golden_matches_expected", "predict_without_key_401"):
+            checks[k] = False
 
-    report = {
-        "decision_record": "ADR-039",
+    where = "a GitHub Actions runner" if run_url() else "the deployer's machine"
+    return {
         "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "url": base,
         "region": app.get("location"),
-        "postgres_region": out.get("pgLocation"),
-        "resource_group_metadata_region": LOCATION,
+        "postgres_region": _param("pgLocation"),
         "resource_group": RESOURCE_GROUP,
-        "container_app": out["appName"],
-        "revision": revision,
+        "container_app": name,
+        "revision": app["properties"]["latestRevisionName"],
         "image": image,
         "image_digest": image.split("@", 1)[1] if "@" in image else None,
-        "git_commit": git_commit,
         "model": health.get("model"),
         "database": health.get("database"),
         "smoke": {
@@ -362,24 +378,147 @@ def cmd_smoke(git_commit: str | None = None) -> None:
         "first_health_note": "cold start only if the app had scaled to zero; right after a "
         "deploy the new replica is usually already running",
         "predict_latency_client_side": {
-            **latency_summary(ms),
-            "note": "sequential, warm replica, measured from the deployer's machine "
+            **(latency_summary(ms) if ms else {"n": 0}),
+            "note": f"sequential, warm replica, measured from {where} "
             f"(includes the internet round trip to {app.get('location')}); "
             "not a load test (TASK-043)",
         },
-        "checked_by": "make azure-smoke (scripts/azure.py)",
     }
+
+
+def write_json(path: Path, report: dict) -> None:
     text = json.dumps(report, indent=2) + "\n"
     assert_no_secrets(text, [os.environ.get(n, "") for n in SECRET_ENVS])
-    REPORT.parent.mkdir(parents=True, exist_ok=True)
-    REPORT.write_bytes(text.encode())
-    for k, v in checks.items():
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(text.encode())
+    print(f"  wrote {path.relative_to(ROOT).as_posix()}")
+
+
+def print_smoke(report: dict) -> None:
+    for k, v in report["smoke"]["checks"].items():
         print(f"  [{'ok' if v else 'FAIL'}] {k}")
-    print(f"  url {base}  revision {revision}")
-    print(f"  p50 /predict {report['predict_latency_client_side']['p50_ms']} ms (client side)")
-    print(f"  wrote {REPORT.relative_to(ROOT).as_posix()}")
+    print(f"  url {report['url']}  image {report['image']}")
+    p50 = report["predict_latency_client_side"].get("p50_ms")
+    print(f"  p50 /predict {p50} ms (client side)")
+
+
+def cmd_smoke(git_commit: str | None = None) -> None:
+    report = {
+        "decision_record": "ADR-040" if run_url() else "ADR-039",
+        **smoke(),
+        "git_commit": git_commit,
+        "workflow_run_url": run_url(),
+        "checked_by": "scripts/azure.py smoke",
+    }
+    print_smoke(report)
+    write_json(REPORT, report)
     if not report["smoke"]["passed"]:
         raise DeployError("cloud smoke failed")
+
+
+def update_image(image: str) -> None:
+    az("containerapp", "update", "-g", RESOURCE_GROUP, "-n", app_name(), "--image", image,
+       "-o", "none")  # fmt: skip
+
+
+def cmd_ci_deploy(image: str, drill: bool, git_commit: str | None) -> None:
+    """Deploy one image by digest; on a failed update or smoke, redeploy the image that was
+    running before, smoke it again, record the rollback and fail (ADR-040, TASK-042)."""
+    app = az_json("containerapp", "show", "-g", RESOURCE_GROUP, "-n", app_name())
+    previous = app["properties"]["template"]["containers"][0]["image"]
+    print(f"running now: {previous}")
+    print(f"deploying:   {image}" + ("  (ROLLBACK DRILL: deliberately broken)" if drill else ""))
+    error = None
+    try:
+        update_image(image)
+    except DeployError as exc:
+        error = str(exc)[-600:]
+    first = smoke(health_timeout=180.0) if error is None else None
+    if first is not None and first["smoke"]["passed"]:
+        if drill:
+            raise DeployError("rollback drill: the broken image passed the smoke (drill invalid)")
+        report = {
+            "decision_record": "ADR-040",
+            **first,
+            "git_commit": git_commit,
+            "previous_image": previous,
+            "workflow_run_url": run_url(),
+            "checked_by": "deploy-azure workflow (scripts/azure.py ci-deploy)",
+        }
+        print_smoke(report)
+        write_json(REPORT, report)
+        return
+    print("deploy FAILED -> redeploying the previous image")
+    update_image(previous)
+    after = smoke()
+    record = {
+        "decision_record": "ADR-040",
+        "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "drill": drill,
+        "workflow_run_url": run_url(),
+        "git_commit": git_commit,
+        "failed_image": image,
+        "failed_update_error": error,
+        "failed_smoke_checks": first["smoke"]["checks"] if first else None,
+        "rolled_back_to": previous,
+        "image_after_rollback": after["image"],
+        "rollback_smoke_passed": after["smoke"]["passed"],
+        "rollback_smoke_checks": after["smoke"]["checks"],
+        "model_after_rollback": after["model"],
+        "workflow_result": "failed (by design: a failed deploy always fails the workflow)",
+    }
+    name = "rollback_drill.json" if drill else f"rollback_{datetime.now(UTC):%Y%m%dT%H%M%SZ}.json"
+    write_json(REPORT.parent / name, record)
+    state = "passed" if after["smoke"]["passed"] else "FAILED"
+    raise DeployError(f"deploy failed; rolled back to {previous}; rollback smoke {state}")
+
+
+def cmd_github_setup() -> None:
+    """OIDC deploy identity (infra/github-deploy.bicep) + GitHub repo variables and secrets.
+    Secret values go to `gh secret set` on stdin; they are never printed."""
+    secrets = need_env(
+        "API_KEY", "MLFLOW_TRACKING_URI", "MLFLOW_TRACKING_USERNAME", "MLFLOW_TRACKING_PASSWORD"
+    )
+    out = outputs()
+    repo = run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]).strip()
+    extra = [b.strip() for b in os.environ.get("AZURE_OIDC_EXTRA_BRANCHES", "").split(",")]
+    branches = ["main", *filter(None, extra)]
+    subjects = [f"repo:{repo}:ref:refs/heads/{b}" for b in branches]
+    location = _param("location")
+    print(f"deploy identity with federated credentials for: {', '.join(branches)}")
+    deploy_template(
+        INFRA / "github-deploy.bicep",
+        "steelsentry-gh-deploy",
+        {
+            "location": location,
+            "acrName": out["acrName"],
+            "pullIdentityName": f"{_param('prefix')}-api-pull-{location}",
+            "subjects": subjects,
+        },
+    )
+    client_id = az(
+        "deployment", "group", "show", "-g", RESOURCE_GROUP, "-n", "steelsentry-gh-deploy",
+        "--query", "properties.outputs.clientId.value", "-o", "tsv",
+    )  # fmt: skip
+    account = az_json("account", "show")
+    variables = {
+        "AZURE_CLIENT_ID": client_id,
+        "AZURE_TENANT_ID": account["tenantId"],
+        "AZURE_SUBSCRIPTION_ID": account["id"],
+        "AZURE_RESOURCE_GROUP": RESOURCE_GROUP,
+        "AZURE_ACR_NAME": out["acrName"],
+        "AZURE_CONTAINER_APP": out["appName"],
+    }
+    for k, v in variables.items():
+        run(["gh", "variable", "set", k, "--body", v])
+    print(f"  repo variables set: {', '.join(variables)}")
+    for k, v in secrets.items():
+        done = subprocess.run(
+            ["gh", "secret", "set", k], input=v, cwd=ROOT, capture_output=True, text=True
+        )
+        if done.returncode != 0:
+            raise DeployError(f"gh secret set {k} failed")
+    print(f"  repo secrets set: {', '.join(secrets)} (values not shown)")
 
 
 def cmd_pg(action: str) -> None:
@@ -454,10 +593,21 @@ def cmd_pg_probe() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    commands = ["up", "deploy", "smoke", "pg-probe", "pg-stop", "pg-start", "down"]
+    commands = [
+        "up", "deploy", "smoke", "pg-probe", "pg-stop", "pg-start", "down",
+        "github-setup", "ci-deploy",
+    ]  # fmt: skip
     parser.add_argument("command", choices=commands)
+    parser.add_argument("--image", help="ci-deploy: image reference by digest")
+    parser.add_argument("--drill", action="store_true", help="ci-deploy: rollback drill")
+    parser.add_argument("--git-commit", help="ci-deploy: commit the image was built from")
     args = parser.parse_args()
     try:
+        if args.command == "ci-deploy":
+            if not args.image or "@sha256:" not in args.image:
+                raise DeployError("ci-deploy needs --image <registry>/<repo>@sha256:...")
+            cmd_ci_deploy(args.image, args.drill, args.git_commit)
+            return
         {
             "up": cmd_up,
             "deploy": cmd_deploy,
@@ -466,6 +616,7 @@ def main() -> None:
             "pg-stop": lambda: cmd_pg("stop"),
             "pg-start": lambda: cmd_pg("start"),
             "down": cmd_down,
+            "github-setup": cmd_github_setup,
         }[args.command]()
     except DeployError as exc:
         print(f"azure {args.command} FAILED: {exc}", file=sys.stderr)

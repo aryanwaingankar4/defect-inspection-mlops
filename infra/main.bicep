@@ -1,0 +1,195 @@
+// Azure deployment of the defect-inspection API (ADR-039; TASK-036/038/039).
+// Deployed by scripts/azure.py (`make azure-up`, `make azure-deploy`) with
+// `az deployment group create` into rg-steelsentry. Incremental and idempotent.
+// No secret has a default; secrets come only from the deployer's environment.
+
+targetScope = 'resourceGroup'
+
+@description('Azure region of the app resources (eastasia: Postgres B1ms is not offered to this subscription in uaenorth, ADR-039). Names carry the region so a region move can run side by side.')
+param location string = resourceGroup().location
+
+@description('Short prefix for resource names.')
+param prefix string = 'steelsentry'
+
+@description('Postgres admin login name (not a secret).')
+param pgAdminLogin string
+
+@secure()
+@description('Postgres admin password (from AZURE_PG_ADMIN_PASSWORD in .env).')
+param pgAdminPassword string
+
+@description('Postgres region; may differ from location when B1ms is not offered there (ADR-039).')
+param pgLocation string = location
+
+@description('Postgres server name (globally unique).')
+param pgServerName string = '${prefix}-pg-${uniqueString(resourceGroup().id, location)}'
+
+@description('Availability zone for Postgres; empty = no preference.')
+param pgZone string = ''
+
+@description('Postgres database the API logs to.')
+param pgDatabaseName string = 'defect'
+
+@description('false: infrastructure only (azure-up). true: also the API Container App (azure-deploy).')
+param deployApp bool = false
+
+@description('Image reference by digest, e.g. <acr>.azurecr.io/defect-inspection-api@sha256:...')
+param image string = ''
+
+@secure()
+param apiKey string = ''
+
+@secure()
+param auditSalt string = ''
+
+@secure()
+@description('postgresql+psycopg://...?sslmode=require (built by scripts/azure.py).')
+param databaseUrl string = ''
+
+var suffix = uniqueString(resourceGroup().id, location)
+var acrPullRoleId = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
+var tags = {
+  project: 'steelsentry'
+  decision: 'ADR-039'
+}
+
+resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
+  name: '${prefix}-logs-${location}'
+  location: location
+  tags: tags
+  properties: {
+    sku: { name: 'PerGB2018' }
+    retentionInDays: 30
+  }
+}
+
+resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
+  name: '${prefix}${suffix}'
+  location: location
+  tags: tags
+  sku: { name: 'Basic' }
+  properties: {
+    adminUserEnabled: false
+  }
+}
+
+resource pullIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: '${prefix}-api-pull-${location}'
+  location: location
+  tags: tags
+}
+
+resource acrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(acr.id, pullIdentity.id, acrPullRoleId)
+  scope: acr
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPullRoleId)
+    principalId: pullIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource env 'Microsoft.App/managedEnvironments@2024-03-01' = {
+  name: '${prefix}-env-${location}'
+  location: location
+  tags: tags
+  properties: {
+    appLogsConfiguration: {
+      destination: 'log-analytics'
+      logAnalyticsConfiguration: {
+        customerId: logs.properties.customerId
+        sharedKey: logs.listKeys().primarySharedKey
+      }
+    }
+  }
+}
+
+module pg 'postgres.bicep' = {
+  name: 'steelsentry-postgres'
+  params: {
+    location: pgLocation
+    serverName: pgServerName
+    adminLogin: pgAdminLogin
+    adminPassword: pgAdminPassword
+    databaseName: pgDatabaseName
+    zone: pgZone
+    tags: tags
+  }
+}
+
+resource api 'Microsoft.App/containerApps@2024-03-01' = if (deployApp) {
+  name: '${prefix}-api'
+  location: location
+  tags: tags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: { '${pullIdentity.id}': {} }
+  }
+  properties: {
+    managedEnvironmentId: env.id
+    configuration: {
+      activeRevisionsMode: 'Single'
+      ingress: {
+        external: true
+        targetPort: 8000
+        transport: 'auto'
+        allowInsecure: false
+      }
+      registries: [
+        {
+          server: acr.properties.loginServer
+          identity: pullIdentity.id
+        }
+      ]
+      secrets: [
+        { name: 'api-key', value: apiKey }
+        { name: 'audit-salt', value: auditSalt }
+        { name: 'database-url', value: databaseUrl }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'api'
+          image: image
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            { name: 'API_KEY', secretRef: 'api-key' }
+            { name: 'AUDIT_SALT', secretRef: 'audit-salt' }
+            { name: 'DATABASE_URL', secretRef: 'database-url' }
+          ]
+          probes: [
+            {
+              type: 'Liveness'
+              httpGet: { path: '/health', port: 8000 }
+              initialDelaySeconds: 10
+              periodSeconds: 30
+            }
+            {
+              type: 'Readiness'
+              httpGet: { path: '/health', port: 8000 }
+              initialDelaySeconds: 3
+              periodSeconds: 10
+            }
+          ]
+        }
+      ]
+      scale: {
+        minReplicas: 0
+        maxReplicas: 1
+      }
+    }
+  }
+  dependsOn: [acrPull, pg]
+}
+
+output acrName string = acr.name
+output acrLoginServer string = acr.properties.loginServer
+output pgServerName string = pg.outputs.name
+output pgHost string = pg.outputs.host
+output pgLocation string = pg.outputs.location
+output envName string = env.name
+output appName string = '${prefix}-api'

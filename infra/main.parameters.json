@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "eastasia"
+    },
+    "prefix": {
+      "value": "steelsentry"
+    },
+    "pgAdminLogin": {
+      "value": "steelsentryadmin"
+    },
+    "pgDatabaseName": {
+      "value": "defect"
+    },
+    "pgLocation": {
+      "value": "eastasia"
+    },
+    "pgServerName": {
+      "value": "steelsentry-pg-ce1ab5ca"
+    }
+  }
+}

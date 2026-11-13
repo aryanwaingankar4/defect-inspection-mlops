@@ -569,3 +569,4 @@ Each entry records a choice and why it was made, so it is not reverted later. Ch
   - Each deploy installs torch through the `train` group, which is slow (see the post-sprint CPU-torch task).
   - Each deploy runs 22 synthetic `/predict` calls, which are logged in the Azure database like any other request.
   - A failed smoke always ends with a red workflow, even when the rollback succeeds, so a person looks at it.
+  - **Fix (2026-11-13):** the first runs on `main` failed at Azure login with `AADSTS700213`. This repo uses GitHub's **immutable OIDC subjects**, `repo:<owner>@<owner_id>/<repo>@<repo_id>:ref:refs/heads/main`, but the credential had the old `repo:<owner>/<repo>:...` form. `make azure-github-oidc` now reads `sub_claim_prefix` from the GitHub API and builds the subject from it. The credential was updated in Azure.

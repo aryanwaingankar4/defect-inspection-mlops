@@ -80,6 +80,16 @@ def latency_summary(ms: list[float]) -> dict[str, float | int]:
     }
 
 
+def oidc_subject(custom: dict, repo: str, branch: str) -> str:
+    """The `sub` claim GitHub will send for a branch. Repos with immutable subjects use
+    `repo:<owner>@<owner_id>/<repo>@<repo_id>`, reported as `sub_claim_prefix` by
+    GET /repos/{repo}/actions/oidc/customization/sub; older repos use `repo:<owner>/<repo>`."""
+    if not custom.get("use_default", True):
+        raise DeployError("custom OIDC subject template: build the subject by hand (ADR-040)")
+    prefix = custom.get("sub_claim_prefix") or f"repo:{repo}"
+    return f"{prefix}:ref:refs/heads/{branch}"
+
+
 def assert_no_secrets(text: str, secrets: list[str]) -> None:
     """Refuse to write a report that contains any secret value."""
     for s in secrets:
@@ -483,7 +493,8 @@ def cmd_github_setup() -> None:
     repo = run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]).strip()
     extra = [b.strip() for b in os.environ.get("AZURE_OIDC_EXTRA_BRANCHES", "").split(",")]
     branches = ["main", *filter(None, extra)]
-    subjects = [f"repo:{repo}:ref:refs/heads/{b}" for b in branches]
+    custom = json.loads(run(["gh", "api", f"repos/{repo}/actions/oidc/customization/sub"]))
+    subjects = [oidc_subject(custom, repo, b) for b in branches]
     location = _param("location")
     print(f"deploy identity with federated credentials for: {', '.join(branches)}")
     deploy_template(

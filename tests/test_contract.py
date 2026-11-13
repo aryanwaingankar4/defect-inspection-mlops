@@ -16,6 +16,7 @@ from src.config import load_params  # noqa: E402
 from src.serving import app as api  # noqa: E402
 from src.serving.contract import openapi_schema, render  # noqa: E402
 from tests import serving_helpers as sh  # noqa: E402
+from tests.db_helpers import migrated  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PARAMS = load_params(REPO_ROOT / "configs" / "params.yaml")
@@ -34,6 +35,7 @@ TYPES = {
 @pytest.fixture(autouse=True)
 def database_url(tmp_path, monkeypatch):
     url = "sqlite:///" + (tmp_path / "db" / "p.db").as_posix()
+    url = migrated(url)  # what `make db-migrate` does (ADR-038)
     monkeypatch.setenv("DATABASE_URL", url)
     return url
 

@@ -24,6 +24,7 @@ from src.serving.bundle import MANIFEST_NAME  # noqa: E402
 from src.serving.preprocess import PreprocessConfig  # noqa: E402
 from src.serving.validation import ValidationConfig, decode_checked  # noqa: E402
 from tests import serving_helpers as sh  # noqa: E402
+from tests.db_helpers import migrated  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PARAMS = sh.without_audit(load_params(REPO_ROOT / "configs" / "params.yaml"))  # exact routing
@@ -37,6 +38,7 @@ KEY = "golden-key"
 @pytest.fixture(autouse=True)
 def database_url(tmp_path, monkeypatch):
     url = "sqlite:///" + (tmp_path / "db" / "p.db").as_posix()
+    url = migrated(url)  # what `make db-migrate` does (ADR-038)
     monkeypatch.setenv("DATABASE_URL", url)
     return url
 

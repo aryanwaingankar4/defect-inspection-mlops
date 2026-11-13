@@ -365,7 +365,8 @@ def create_app(
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         bundle = load_bundle(bundle_path, params["preprocess"])  # raises: the API does not start
         db = PredictionLog(db_url)
-        db.create_tables()  # raises if the database is unreachable: the API does not start
+        # never migrates (ADR-038): refuses unless the schema is at head; raises if unreachable
+        db.require_head()
         app.state.bundle, app.state.db = bundle, db
         metrics.queue_size.set_function(lambda: queue_size(db))
         info = bundle.model_info

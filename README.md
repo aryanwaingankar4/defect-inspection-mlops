@@ -89,6 +89,14 @@ The Docker stack (`make docker-up`) keeps its own log in the Docker volume `pred
 
 `make db-reset` moves the local log to `data/archive/` (git-ignored) and starts an empty one, for example after testing the UI by hand.
 
+### Database schema (Alembic, ADR-038)
+
+- **Migrations:** Alembic owns the schema (`src/db/migrations/`). `make db-migrate` upgrades `DATABASE_URL` to the latest revision.
+- **The API never migrates.** It refuses to start if the database is not at the latest revision, and the error says to run `make db-migrate`. The review UI, the simulated reviewer and the feedback export do the same.
+- **Docker:** in the compose stack, a one-shot `migrate` service runs before the API.
+- **Logs from before Alembic:** `make db-migrate` checks a pre-Alembic local log against the baseline schema and stamps it only if they match exactly.
+- **Local Postgres for tests:** `make pg-up` starts it, then `make test-db-postgres` runs the migrations and the DB tests against it. `make docker-smoke-postgres` runs the API smoke against it. It listens on 127.0.0.1 only, with a fixed password meant only for these tests. CI runs the same migrations and tests on a Postgres service container.
+
 `make retrain` runs one loop cycle (ADR-034). It uploads the feedback export to a private Kaggle dataset, trains on Kaggle's GPU from the ImageNet weights on `train_v1` + feedback, registers the result as `@challenger`, and runs the promotion gate in record mode. It resumes if interrupted, and it never moves `@champion`. Each cycle writes `results/retrain/cycle_<run_uid>.json` and `results/promotion/gate_<version>.json`.
 
 ### Loop cycles (simulated, ADR-036)

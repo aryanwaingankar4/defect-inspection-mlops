@@ -5,13 +5,19 @@ them at the end. Sends only the committed synthetic golden image (ADR-017): no N
 into or near the container. Checks:
 health check healthy, /health, /predict (= tests/golden/expected.json), 401 without key,
 non-root user, no torch/mlflow inside, read-only filesystem, one logged row that survives a
-restart, the key not in the logs, image labels.
+restart, the key not in the logs, image labels; and (ADR-038) that the API refuses to start on a
+database that was never migrated, while the one-shot ``migrate`` service brings the compose
+database to head first.
 On success it writes ``results/docker/image_report.json`` (image tag, size, user id, read-only
 root filesystem, the git commit the image was built from).
+
+``--postgres``: the same checks with the API on the compose test Postgres (profile ``postgres``,
+fixed non-secret local password, ADR-038); writes ``results/docker/image_report_postgres.json``.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import secrets
@@ -27,12 +33,26 @@ ROOT = Path(__file__).resolve().parents[1]
 PROJECT = "defect-inspection-smoke"
 PORT = "18000"
 IMAGE = "defect-inspection-api:local"
-REPORT = ROOT / "results" / "docker" / "image_report.json"
+REPORTS = {
+    "sqlite": ROOT / "results" / "docker" / "image_report.json",
+    "postgres": ROOT / "results" / "docker" / "image_report_postgres.json",
+}
+DATABASES = {
+    "sqlite": "sqlite:////data/predictions.db",
+    # LOCAL TEST database only (ADR-038): fixed, non-secret password, compose network only
+    "postgres": "postgresql+psycopg://defect:defect-local-test@postgres:5432/defect",
+}
+PG_PORT = "15433"  # host port of the smoke Postgres (not the 5433 of `make pg-up`)
+PROFILE: list[str] = []
 BASE = f"http://127.0.0.1:{PORT}"
 GOLDEN = ROOT / "tests" / "golden"
 ROW_COUNT = (
-    "from src.db.store import PredictionLog; "
-    "print(PredictionLog('sqlite:////data/predictions.db').count())"
+    "import os; from src.db.store import PredictionLog; "
+    "print(PredictionLog(os.environ['DATABASE_URL']).count())"
+)
+REVISION = (
+    "import os; from src.db import migrate; from src.db.store import make_engine; "
+    "print(migrate.check_at_head(make_engine(os.environ['DATABASE_URL'])))"
 )
 
 
@@ -41,7 +61,7 @@ class SmokeError(RuntimeError):
 
 
 def compose(*args: str, env: dict[str, str], check: bool = True) -> str:
-    cmd = ["docker", "compose", "-p", PROJECT, *args]
+    cmd = ["docker", "compose", "-p", PROJECT, *PROFILE, *args]
     out = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True)
     if check and out.returncode != 0:
         raise SmokeError(f"`docker compose {' '.join(args)}` failed:\n{out.stderr[-2000:]}")
@@ -50,7 +70,7 @@ def compose(*args: str, env: dict[str, str], check: bool = True) -> str:
 
 def exec_in(env: dict[str, str], *cmd: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["docker", "compose", "-p", PROJECT, "exec", "-T", "api", *cmd],
+        ["docker", "compose", "-p", PROJECT, *PROFILE, "exec", "-T", "api", *cmd],
         cwd=ROOT,
         env=env,
         capture_output=True,
@@ -104,14 +124,31 @@ def check(ok: bool, label: str, results: list[str]) -> None:
         raise SmokeError(label)
 
 
-def run() -> list[str]:
+def refuses_unmigrated(key: str) -> tuple[bool, str]:
+    """The image on an empty SQLite file (never migrated) must exit with the ADR-038 error."""
+    out = subprocess.run(
+        [
+            "docker", "run", "--rm", "--read-only", "--tmpfs", "/tmp:size=16m",
+            "-e", f"API_KEY={key}", "-e", "AUDIT_SALT=smoke-salt",
+            "-e", "DATABASE_URL=sqlite:////tmp/never-migrated.db", IMAGE,
+        ],
+        capture_output=True, text=True, timeout=120,
+    )  # fmt: skip
+    text = out.stdout + out.stderr
+    return out.returncode != 0 and "make db-migrate" in text, text[-300:]
+
+
+def run(backend: str = "sqlite") -> list[str]:
     key = secrets.token_hex(16)  # throwaway: never printed
+    report_file = REPORTS[backend]
     # compose checks every required variable, also for services this smoke does not start
     env = {
         **os.environ,
         "API_KEY": key,
         "API_PORT": PORT,
         "GRAFANA_ADMIN_PASSWORD": secrets.token_hex(16),
+        "API_DATABASE_URL": DATABASES[backend],
+        "POSTGRES_PORT": PG_PORT,
     }
     out: list[str] = []
     labels = json.loads(
@@ -134,9 +171,13 @@ def run() -> list[str]:
         f", onnx {labels['io.defect-inspection.onnx-sha256'][:12]}..., "
         f"commit {labels['org.opencontainers.image.revision']}"
     )
+    refused, text = refuses_unmigrated(key)
+    check(refused, "API refuses to start on a never-migrated database (ADR-038)", out)
     try:
-        compose("up", "-d", "--no-build", "api", env=env)
+        compose("up", "-d", "--no-build", "api", env=env)  # migrate (and postgres) run first
         out.append(f"  healthy after {wait_healthy(env):.1f} s (Docker HEALTHCHECK)")
+        rev = exec_in(env, "python", "-c", REVISION).stdout.strip()
+        check(rev != "", f"{backend} database migrated to head by the migrate service ({rev})", out)
         status, health = request("/health")
         check(status == 200 and health["database"] == "ok", f"/health 200: {health}", out)
 
@@ -188,35 +229,43 @@ def run() -> list[str]:
         logs = compose("logs", "api", env=env)
         check(key not in logs, "API key not in the container logs", out)
         check(pred["request_id"] in logs, "request_id in the JSON logs", out)
-        write_report(
-            {
-                "image": IMAGE,
-                "size_mb": round(int(size) / 1e6, 1),
-                "size_source": "docker image inspect .Size",
-                "user_id": int(uid),
-                "read_only_root_filesystem": ro,
-                "git_commit": labels["org.opencontainers.image.revision"],
-                "model_version": version,
-                "onnx_sha256": labels["io.defect-inspection.onnx-sha256"],
-                "smoke_passed": True,
-                "checked_by": "make docker-smoke (scripts/docker_smoke.py)",
-            }
-        )
-        out.append(f"  wrote {REPORT.relative_to(ROOT).as_posix()}")
+        report = {
+            "image": IMAGE,
+            "size_mb": round(int(size) / 1e6, 1),
+            "size_source": "docker image inspect .Size",
+            "user_id": int(uid),
+            "read_only_root_filesystem": ro,
+            "git_commit": labels["org.opencontainers.image.revision"],
+            "model_version": version,
+            "onnx_sha256": labels["io.defect-inspection.onnx-sha256"],
+            "smoke_passed": True,
+            "checked_by": "make docker-smoke (scripts/docker_smoke.py)"
+            + (" --postgres" if backend == "postgres" else ""),
+            "database": backend,
+            "schema_revision": rev,
+        }
+        write_report(report_file, report)
+        out.append(f"  wrote {report_file.relative_to(ROOT).as_posix()}")
     finally:
         compose("down", "-v", env=env, check=False)
         out.append("  stopped; smoke volume removed")
     return out
 
 
-def write_report(report: dict) -> None:
-    REPORT.parent.mkdir(parents=True, exist_ok=True)
-    REPORT.write_bytes((json.dumps(report, indent=2) + "\n").encode())
+def write_report(path: Path, report: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes((json.dumps(report, indent=2) + "\n").encode())
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--postgres", action="store_true", help="API on the compose test Postgres")
+    args = parser.parse_args()
+    backend = "postgres" if args.postgres else "sqlite"
+    if args.postgres:
+        PROFILE[:] = ["--profile", "postgres"]
     try:
-        lines = run()
+        lines = run(backend)
     except SmokeError as exc:
         print(f"docker smoke FAILED: {exc}")
         sys.exit(1)

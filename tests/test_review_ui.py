@@ -9,8 +9,10 @@ pytest.importorskip("sqlalchemy")
 
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
+from src.db import migrate  # noqa: E402
 from src.db.store import PredictionLog  # noqa: E402
 from tests import review_helpers as rh  # noqa: E402
+from tests.db_helpers import migrated  # noqa: E402
 
 APP = Path(__file__).resolve().parents[1] / "src" / "review" / "app.py"
 PASSWORD = "test-reviewer-password"
@@ -19,10 +21,11 @@ PASSWORD = "test-reviewer-password"
 @pytest.fixture
 def db_url(tmp_path, monkeypatch):
     url = "sqlite:///" + (tmp_path / "db" / "review.db").as_posix()
+    url = migrated(url)  # what `make db-migrate` does (ADR-038)
     monkeypatch.setenv("DATABASE_URL", url)
     monkeypatch.setenv("REVIEWER_PASSWORD", PASSWORD)
     log = PredictionLog(url)
-    log.create_tables()
+    migrate.upgrade(log.engine)
     yield url
     log.dispose()
 

@@ -43,6 +43,47 @@ jobs:
       - name: Fast tests (no data, no model)
         run: make test
 
+  postgres:
+    # ADR-038: Alembic migrations and the DB tests on a real Postgres (same pinned image as the
+    # compose `postgres` profile). The password is a fixed, non-secret value for this throwaway
+    # CI database only.
+    name: Postgres (migrations + DB tests)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16.14@sha256:95206741a5b214807675e14165369d05b93a9cf692223b616d07cca227e74b0b
+        env:
+          POSTGRES_USER: defect
+          POSTGRES_DB: defect
+          POSTGRES_PASSWORD: defect-local-test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U defect -d defect"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      PG_TEST_URL: postgresql+psycopg://defect:defect-local-test@127.0.0.1:5433/defect
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          version: "0.13.6"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install from the lockfile
+        run: uv sync --locked --group serve
+
+      - name: make db-migrate (alembic upgrade head)
+        run: make db-migrate DATABASE_URL="$PG_TEST_URL" ENV_FILE=
+
+      - name: DB and migration tests on Postgres
+        run: TEST_DATABASE_URL="$PG_TEST_URL" uv run --locked --group serve pytest tests/test_db.py tests/test_migrations.py
+
   trivy:
     name: Trivy (fs + config)
     runs-on: ubuntu-24.04

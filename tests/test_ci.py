@@ -71,3 +71,18 @@ def test_trivy_is_checksum_verified_and_fails_only_on_fixable_critical():
 def test_readme_has_the_ci_badge():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     assert "actions/workflows/ci.yml/badge.svg" in readme
+
+
+def test_postgres_job_migrates_then_runs_the_db_tests():
+    """ADR-038: a pinned Postgres service container, `make db-migrate`, then the DB tests."""
+    job = WORKFLOW["jobs"]["postgres"]
+    image = job["services"]["postgres"]["image"]
+    assert re.fullmatch(r"postgres:16\.\d+@sha256:[0-9a-f]{64}", image)
+    compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    assert compose["services"]["postgres"]["image"] == image  # the same as local tests
+    runs = [s.get("run", "") for s in job["steps"]]
+    migrate = next(i for i, r in enumerate(runs) if r.startswith("make db-migrate"))
+    tests = next(i for i, r in enumerate(runs) if "TEST_DATABASE_URL" in r)
+    assert migrate < tests and "tests/test_migrations.py" in runs[tests]
+    assert job["env"]["PG_TEST_URL"].startswith("postgresql+psycopg://")
+    assert "@127.0.0.1:" in job["env"]["PG_TEST_URL"]

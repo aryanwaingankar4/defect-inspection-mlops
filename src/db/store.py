@@ -15,9 +15,8 @@ from typing import Any
 from sqlalchemy import Engine, case, create_engine, func, inspect, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
-from sqlalchemy.schema import CreateColumn
 
-from src.db.models import Base, Feedback, Prediction
+from src.db.models import Feedback, Prediction
 
 DATABASE_URL_ENV = "DATABASE_URL"
 
@@ -27,7 +26,7 @@ class DatabaseConfigError(RuntimeError):
 
 
 class SchemaError(RuntimeError):
-    """The existing table differs from the model in a way that needs a real migration."""
+    """The database is not at the schema revision this code needs (ADR-038)."""
 
 
 def database_url_from_env() -> str:
@@ -46,12 +45,14 @@ def make_engine(url: str) -> Engine:
     """Engine for ``url``; SQLite files get their folder created and cross-thread use allowed
     (the API runs requests in a thread pool)."""
     parsed = make_url(url)
+    if parsed.drivername == "postgresql":  # the form Azure gives; psycopg 3 is installed
+        parsed = parsed.set(drivername="postgresql+psycopg")
     kwargs: dict[str, Any] = {}
     if parsed.get_backend_name() == "sqlite":
         kwargs["connect_args"] = {"check_same_thread": False}
         if parsed.database and parsed.database != ":memory:":
             Path(parsed.database).parent.mkdir(parents=True, exist_ok=True)
-    return create_engine(url, **kwargs)
+    return create_engine(parsed, **kwargs)
 
 
 class PredictionLog:
@@ -60,29 +61,11 @@ class PredictionLog:
     def __init__(self, url: str) -> None:
         self.engine = make_engine(url)
 
-    def create_tables(self) -> None:
-        """Create missing tables, then add missing columns that have a server default
-        (additive only, ADR-030). Anything else stops here: real migrations (Alembic) come at
-        TASK-037."""
-        Base.metadata.create_all(self.engine)
-        self.upgrade_schema()
+    def require_head(self) -> str:
+        """Refuse unless the schema is at the Alembic head (ADR-038); never migrates."""
+        from src.db.migrate import check_at_head
 
-    def upgrade_schema(self) -> list[str]:
-        """Add columns of the model that the table lacks, if each has a server default."""
-        table = Prediction.__table__
-        existing = {c["name"] for c in inspect(self.engine).get_columns(table.name)}
-        missing = [c for c in table.columns if c.name not in existing]
-        unknown = existing - {c.name for c in table.columns}
-        if unknown:
-            raise SchemaError(f"table {table.name} has columns the code does not know: {unknown}")
-        no_default = [c.name for c in missing if c.server_default is None]
-        if no_default:
-            raise SchemaError(f"columns {no_default} are missing and have no default: migrate")
-        with self.engine.begin() as conn:
-            for col in missing:
-                ddl = CreateColumn(col).compile(dialect=self.engine.dialect)
-                conn.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {ddl}"))
-        return [c.name for c in missing]
+        return check_at_head(self.engine)
 
     def ping(self) -> bool:
         try:

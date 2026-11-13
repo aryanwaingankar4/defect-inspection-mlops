@@ -96,7 +96,28 @@ def test_compose_passes_only_the_needed_environment():
     assert set(env) == {"API_KEY", "AUDIT_SALT", "DATABASE_URL"}
     assert env["API_KEY"].startswith("${API_KEY:?")  # required, never a default value
     assert env["AUDIT_SALT"].startswith("${AUDIT_SALT:?")  # ADR-030
-    assert env["DATABASE_URL"] == "sqlite:////data/predictions.db"
+    assert env["DATABASE_URL"] == "${API_DATABASE_URL:-sqlite:////data/predictions.db}"
+
+
+def test_compose_migrates_before_the_api_and_the_api_never_migrates():
+    """ADR-038: a one-shot migrate service, same image and database; the API waits for it."""
+    migrate = COMPOSE["services"]["migrate"]
+    assert migrate["image"] == API["image"]
+    assert migrate["command"] == ["python", "-m", "src.db.migrate", "upgrade"]
+    assert migrate["environment"] == {"DATABASE_URL": API["environment"]["DATABASE_URL"]}
+    assert migrate["restart"] == "no" and migrate["read_only"] is True
+    assert API["depends_on"]["migrate"]["condition"] == "service_completed_successfully"
+    assert "migrate" not in " ".join(map(str, API.get("command", [])))
+
+
+def test_compose_test_postgres_is_local_pinned_and_optional():
+    pg = COMPOSE["services"]["postgres"]
+    assert pg["profiles"] == ["postgres"]  # never started by `make docker-up`
+    assert re.fullmatch(r"postgres:16\.\d+@sha256:[0-9a-f]{64}", pg["image"])
+    assert all(p.startswith("127.0.0.1:") for p in pg["ports"])
+    assert pg["environment"]["POSTGRES_PASSWORD"] == "defect-local-test"  # fixed, non-secret
+    dep = COMPOSE["services"]["migrate"]["depends_on"]["postgres"]
+    assert dep == {"condition": "service_healthy", "required": False}
 
 
 def test_compose_volume_ports_and_hardening():

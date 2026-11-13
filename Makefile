@@ -24,7 +24,8 @@ MANIFEST := models/serving/manifest.json
 SMOKE_AUDIT_SALT := smoke-test-audit-salt-not-secret
 
 .PHONY: help setup lock lint format test test-all check data split near-dups near-copies near-dups-cnn repro push pull train train-smoke \
-	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke docker-smoke-postgres monitoring-smoke db-migrate pg-up pg-down test-db-postgres review-ui stream simulate-review db-reset feedback-export gate retrain challenger-serving rollback challenger loop-chunks loop-record fault-export loop-final loop-summary register kaggle-dataset kaggle-push kaggle-status kaggle-output
+	compare-val calibrate threshold ood evaluate champion export-onnx quantize serving-bundle serve golden openapi-snapshot docker-build docker-up docker-down docker-smoke docker-smoke-postgres monitoring-smoke db-migrate pg-up pg-down test-db-postgres review-ui stream simulate-review db-reset feedback-export gate retrain challenger-serving rollback challenger loop-chunks loop-record fault-export loop-final loop-summary register kaggle-dataset kaggle-push kaggle-status kaggle-output \
+	azure-up azure-deploy azure-smoke pg-stop pg-start azure-down
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  %-10s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -230,3 +231,24 @@ kaggle-status: ## Status of the latest Kaggle training run
 
 kaggle-output: ## Download the latest Kaggle run's outputs to build/kaggle-output/
 	$(RUN) python -m src.pipelines.kaggle_job --config $(PARAMS) output
+
+# Azure (ADR-039): rg-steelsentry in uaenorth. Needs `az login`; secrets come from .env only.
+AZURE := $(RUN) $(ENV_FILE) python scripts/azure.py
+
+azure-up: ## Azure infrastructure from infra/main.bicep (idempotent; no app) + $$10 budget (ADR-039)
+	$(AZURE) up
+
+azure-deploy: ## Build + push the image to ACR, migrate Azure Postgres, deploy the API app, cloud smoke
+	$(AZURE) deploy
+
+azure-smoke: ## Cloud smoke of the running app -> results/cloud/deploy_report.json (synthetic image only)
+	$(AZURE) smoke
+
+pg-stop: ## Stop the Azure Postgres server (saves compute cost; Azure restarts it after 7 days)
+	$(AZURE) pg-stop
+
+pg-start: ## Start the Azure Postgres server
+	$(AZURE) pg-start
+
+azure-down: ## DELETE the whole Azure resource group (asks you to type its name)
+	$(AZURE) down

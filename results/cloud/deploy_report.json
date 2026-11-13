@@ -1,0 +1,48 @@
+{
+  "decision_record": "ADR-039",
+  "generated_at": "2026-11-13T16:29:09Z",
+  "url": "https://steelsentry-api.greencliff-40abdfae.eastasia.azurecontainerapps.io",
+  "region": "East Asia",
+  "postgres_region": "East Asia",
+  "resource_group_metadata_region": "uaenorth",
+  "resource_group": "rg-steelsentry",
+  "container_app": "steelsentry-api",
+  "revision": "steelsentry-api--latest",
+  "image": "steelsentry74zbwmoyl4dtu.azurecr.io/defect-inspection-api@sha256:5852c886a5cd6affba4ea760e382d6036fe124fe3a2e3af73d291f649f2aa955",
+  "image_digest": "sha256:5852c886a5cd6affba4ea760e382d6036fe124fe3a2e3af73d291f649f2aa955",
+  "git_commit": "0410f55",
+  "model": {
+    "name": "steel-defect-classifier",
+    "version": "5",
+    "alias": "champion",
+    "precision": "fp32"
+  },
+  "database": "ok",
+  "smoke": {
+    "passed": true,
+    "checks": {
+      "health_200_ok": true,
+      "predict_golden_matches_expected": true,
+      "predict_without_key_401": true,
+      "latency_requests_all_200": true
+    },
+    "golden_prediction": "scratches",
+    "golden_calibrated_confidence": 0.9900663375202328,
+    "golden_reasons": [],
+    "expected": {
+      "prediction": "scratches",
+      "calibrated_confidence": 0.9900663401229745,
+      "reasons": []
+    }
+  },
+  "first_health_seconds": 0.5,
+  "first_health_note": "cold start only if the app had scaled to zero; right after a deploy the new replica is usually already running",
+  "predict_latency_client_side": {
+    "n": 20,
+    "p50_ms": 364.9,
+    "min_ms": 351.3,
+    "max_ms": 496.8,
+    "note": "sequential, warm replica, measured from the deployer's machine (includes the internet round trip to East Asia); not a load test (TASK-043)"
+  },
+  "checked_by": "make azure-smoke (scripts/azure.py)"
+}

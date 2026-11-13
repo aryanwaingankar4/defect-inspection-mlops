@@ -1,16 +1,14 @@
 {
-  "decision_record": "ADR-039",
-  "generated_at": "2026-11-13T16:29:09Z",
+  "decision_record": "ADR-040",
+  "generated_at": "2026-11-13T18:25:24Z",
   "url": "https://steelsentry-api.greencliff-40abdfae.eastasia.azurecontainerapps.io",
   "region": "East Asia",
-  "postgres_region": "East Asia",
-  "resource_group_metadata_region": "uaenorth",
+  "postgres_region": "eastasia",
   "resource_group": "rg-steelsentry",
   "container_app": "steelsentry-api",
   "revision": "steelsentry-api--latest",
-  "image": "steelsentry74zbwmoyl4dtu.azurecr.io/defect-inspection-api@sha256:5852c886a5cd6affba4ea760e382d6036fe124fe3a2e3af73d291f649f2aa955",
-  "image_digest": "sha256:5852c886a5cd6affba4ea760e382d6036fe124fe3a2e3af73d291f649f2aa955",
-  "git_commit": "0410f55",
+  "image": "steelsentry74zbwmoyl4dtu.azurecr.io/defect-inspection-api@sha256:a49a4c1ec2aac0d85b418172b20256ee684c57395f03b55ea418fe564a20c36f",
+  "image_digest": "sha256:a49a4c1ec2aac0d85b418172b20256ee684c57395f03b55ea418fe564a20c36f",
   "model": {
     "name": "steel-defect-classifier",
     "version": "5",
@@ -35,14 +33,17 @@
       "reasons": []
     }
   },
-  "first_health_seconds": 0.5,
+  "first_health_seconds": 0.6,
   "first_health_note": "cold start only if the app had scaled to zero; right after a deploy the new replica is usually already running",
   "predict_latency_client_side": {
     "n": 20,
-    "p50_ms": 364.9,
-    "min_ms": 351.3,
-    "max_ms": 496.8,
-    "note": "sequential, warm replica, measured from the deployer's machine (includes the internet round trip to East Asia); not a load test (TASK-043)"
+    "p50_ms": 562.6,
+    "min_ms": 557.4,
+    "max_ms": 596.3,
+    "note": "sequential, warm replica, measured from a GitHub Actions runner (includes the internet round trip to East Asia); not a load test (TASK-043)"
   },
-  "checked_by": "make azure-smoke (scripts/azure.py)"
+  "git_commit": "145922a87aae4d86a99047582d450db058096c5b",
+  "previous_image": "steelsentry74zbwmoyl4dtu.azurecr.io/defect-inspection-api@sha256:5852c886a5cd6affba4ea760e382d6036fe124fe3a2e3af73d291f649f2aa955",
+  "workflow_run_url": "https://github.com/aryanwaingankar4/defect-inspection-mlops/actions/runs/43481990871",
+  "checked_by": "deploy-azure workflow (scripts/azure.py ci-deploy)"
 }

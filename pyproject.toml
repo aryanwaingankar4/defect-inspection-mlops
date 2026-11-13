@@ -43,6 +43,9 @@ serve = [
 ui = [
     "streamlit==1.66.1",
 ]
+load = [
+    "locust==2.47.0",
+]
 
 [tool.uv]
 package = false

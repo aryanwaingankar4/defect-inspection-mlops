@@ -1,0 +1,27 @@
+{
+  "task": "TASK-043",
+  "generated_at": "2026-11-13T22:00:31Z",
+  "url": "https://steelsentry-api.greencliff-40abdfae.eastasia.azurecontainerapps.io",
+  "endpoint": "POST /predict (synthetic golden image only)",
+  "users": 20,
+  "spawn_rate_per_s": 5,
+  "run_time": "2m",
+  "wait_time_s": [
+    0.5,
+    1.5
+  ],
+  "warm_up_seconds": 2.2,
+  "locust_exit_code": 0,
+  "requests": 1781,
+  "failures": 0,
+  "error_rate": 0.0,
+  "rps": 14.84,
+  "p50_ms": 170.0,
+  "p95_ms": 910.0,
+  "p99_ms": 1500.0,
+  "mean_ms": 334.2,
+  "max_ms": 1792.541499977233,
+  "deployment": "as deployed, nothing tuned: Azure Container Apps eastasia, max 1 replica, 0.5 vCPU / 1 GiB, FP32 ONNX, every request logged to Azure Postgres (ADR-039)",
+  "client": "the deployer's laptop over the public internet (latency includes the round trip)",
+  "tool": "locust 2.47.0 (scripts/locustfile.py, scripts/load_test.py)"
+}

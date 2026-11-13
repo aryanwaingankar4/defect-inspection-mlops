@@ -41,6 +41,19 @@ def test_latency_summary_p50() -> None:
     assert out == {"n": 4, "p50_ms": 25.0, "min_ms": 10.0, "max_ms": 40.0}
 
 
+def test_oidc_subject_uses_immutable_prefix_when_github_reports_one() -> None:
+    custom = {
+        "use_default": True,
+        "use_immutable_subject": True,
+        "sub_claim_prefix": "repo:octo@1/app@2",
+    }
+    assert azure.oidc_subject(custom, "octo/app", "main") == "repo:octo@1/app@2:ref:refs/heads/main"
+    legacy = {"use_default": True}
+    assert azure.oidc_subject(legacy, "octo/app", "main") == "repo:octo/app:ref:refs/heads/main"
+    with pytest.raises(azure.DeployError):
+        azure.oidc_subject({"use_default": False}, "octo/app", "main")
+
+
 def test_report_refuses_secret_values() -> None:
     azure.assert_no_secrets('{"url": "https://x"}', ["s3cret", ""])
     with pytest.raises(azure.DeployError):
